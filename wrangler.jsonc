@@ -1,0 +1,8 @@
+// Конфиг Cloudflare Workers: раздаём содержимое репозитория как статический сайт
+{
+  "name": "skes-mashina",
+  "compatibility_date": "2026-06-01",
+  "assets": {
+    "directory": "./"
+  }
+}
