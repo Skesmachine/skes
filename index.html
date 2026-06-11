@@ -1,0 +1,2546 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#f6ead0">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Скес машина">
+<title>Скес машина</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
+<!-- Three.js (ES-модули, без сборки) — для 3D-банки в развёрнутой карточке -->
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ─── РЕТРО-ИГРОВОЙ ПАЙПЛАЙН БАНКИ ────────────────────────────
+   фото → (1) вырезаем фон по цветам краёв кадра → (2) игровая
+   текстура 90-х: 256px, постеризация 5 цветов, контраст, толстые
+   чёрные контуры → (3) low-poly цилиндр на 20 граней с flat
+   shading → (4) MeshToonMaterial с 4 ступенями света, толстой
+   чёрной обводкой и тёплым rim-light → (5) этикетка только на
+   передней дуге, остальное — цвет бренда. Стиль > реализм. */
+
+// 4 ступени света — «комиксовый» свет без плавных переходов
+function toonGradient(){
+  const tones=new Uint8Array([70,140,210,255]);
+  const t=new THREE.DataTexture(tones,tones.length,1,THREE.RedFormat);
+  t.minFilter=t.magFilter=THREE.NearestFilter; t.needsUpdate=true;
+  return t;
+}
+
+// ШАГ 1: оставить банку — фон/стол распознаём по среднему цвету
+// каждой из четырёх рамок кадра и отбрасываем похожие пиксели
+function extractLabel(img){
+  const sw=img.naturalWidth||img.width, sh=img.naturalHeight||img.height;
+  // рабочее разрешение повыше: 640px, чтобы буквы пережили пикселизацию
+  const W=Math.min(640,Math.max(64,sw)), H=Math.max(32,Math.round(sh*W/sw));
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const ctx=cv.getContext('2d');
+  ctx.drawImage(img,0,0,W,H);
+  let id;
+  try{ id=ctx.getImageData(0,0,W,H); }catch(e){ return cv; }   // CORS — как есть
+  const d=id.data;
+  const edge=(x0,y0,x1,y1)=>{ let r=0,g=0,b=0,n=0;
+    for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){ const p=(y*W+x)*4; r+=d[p]; g+=d[p+1]; b+=d[p+2]; n++; }
+    return [r/n,g/n,b/n]; };
+  const m=Math.max(2,Math.round(W*0.03));
+  const refs=[edge(0,0,W,m),edge(0,H-m,W,H),edge(0,0,m,H),edge(W-m,0,W,H)];
+  const N=W*H, mask=new Uint8Array(N);
+  // если есть прозрачность от лассо — она и есть готовая маска фона,
+  // цветовую эвристику не подключаем вовсе
+  let alphaN=0;
+  for(let i=0;i<N;i++) if(d[i*4+3]<60) alphaN++;
+  const alphaOnly = alphaN>N*0.03;
+  let bgN=0;
+  for(let i=0;i<N;i++){
+    const p=i*4;
+    if(d[p+3]<60 || (!alphaOnly && refs.some(c=>{ const dr=d[p]-c[0],dg=d[p+1]-c[1],db=d[p+2]-c[2]; return dr*dr+dg*dg+db*db<3600; }))){ mask[i]=1; bgN++; }
+  }
+  // защита: «фон» не имеет права съедать центр кадра — там точно банка.
+  // на плотно обрезанных фото края кадра = сама банка, и без этой проверки
+  // эвристика выкидывала доминирующий цвет банки (розовая становилась зелёной)
+  if(!alphaOnly){
+    let cN=0,cBG=0;
+    for(let y=Math.round(H*0.35);y<H*0.65;y++)
+      for(let x=Math.round(W*0.35);x<W*0.65;x++){ cN++; if(mask[y*W+x]) cBG++; }
+    if(cN && cBG/cN>0.3){
+      for(let i=0;i<N;i++){ const p=i*4; if(d[p+3]<60){ d[p]=184; d[p+1]=178; d[p+2]=166; d[p+3]=255; } }
+      ctx.putImageData(id,0,0);
+      return cv;          // кадр уже плотный — отдаём как есть
+    }
+  }
+  // средний цвет банки — им гасим фон и прозрачность (иначе дыры в текстуре)
+  let ar=0,ag=0,ab=0,an=0;
+  for(let i=0;i<N;i++) if(!mask[i]){ const p=i*4; ar+=d[p]; ag+=d[p+1]; ab+=d[p+2]; an++; }
+  if(an){ ar/=an; ag/=an; ab/=an; } else { ar=184; ag=178; ab=166; }
+  const frac=bgN/N;
+  if(frac>0.82||frac<0.08){
+    // кроп не нужен/невозможен, но прозрачные пиксели всё равно заливаем
+    for(let i=0;i<N;i++){ const p=i*4; if(d[p+3]<60){ d[p]=ar; d[p+1]=ag; d[p+2]=ab; d[p+3]=255; } }
+    ctx.putImageData(id,0,0);
+    return cv;
+  }
+  // рамка банки: строки/столбцы, где непофоновых пикселей достаточно
+  const rows=new Array(H).fill(0), cols=new Array(W).fill(0);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++) if(!mask[y*W+x]){ rows[y]++; cols[x]++; }
+  let x0=0,x1=W-1,y0=0,y1=H-1;
+  while(x0<W-1&&cols[x0]<H*0.18)x0++;
+  while(x1>x0&&cols[x1]<H*0.18)x1--;
+  while(y0<H-1&&rows[y0]<(x1-x0)*0.3)y0++;
+  while(y1>y0&&rows[y1]<(x1-x0)*0.3)y1--;
+  if((x1-x0+1)*(y1-y0+1)<N*0.12){
+    for(let i=0;i<N;i++){ const p=i*4; if(d[p+3]<60){ d[p]=ar; d[p+1]=ag; d[p+2]=ab; d[p+3]=255; } }
+    ctx.putImageData(id,0,0);
+    return cv;
+  }
+  // фон и прозрачность внутри рамки → средний цвет банки, альфа непрозрачная
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+    const i=y*W+x, p=i*4;
+    if(mask[i]){ d[p]=ar; d[p+1]=ag; d[p+2]=ab; }
+    d[p+3]=255;
+  }
+  ctx.putImageData(id,0,0);
+  const out=document.createElement('canvas');
+  out.width=x1-x0+1; out.height=y1-y0+1;
+  out.getContext('2d').drawImage(cv,x0,y0,out.width,out.height,0,0,out.width,out.height);
+  return out;
+}
+
+// ШАГ 2: текстура как из игры 1999 года. Вместо поканальной
+// постеризации (она давала шумное конфетти) — палитровая квантизация:
+// вся этикетка сводится к 6 доминирующим цветам, контуры рисуются
+// только на границах цветовых областей. Плоско и чисто.
+function stylizeTexture(srcCv){
+  // разрешение текстуры = разрешению этикетки (до 640px) — без удушения
+  const W=Math.min(640,Math.max(64,srcCv.width));
+  const H=Math.max(32,Math.round(srcCv.height*W/srcCv.width));
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const ctx=cv.getContext('2d');
+  // пикселизация «16»: вниз в 16 раз со сглаживанием (усреднение),
+  // обратно — БЕЗ него: крупные честные блоки, как спрайт из 90-х
+  const PIX=16;
+  const low=document.createElement('canvas');
+  low.width=Math.max(1,Math.round(W/PIX)); low.height=Math.max(1,Math.round(H/PIX));
+  low.getContext('2d').drawImage(srcCv,0,0,low.width,low.height);
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(low,0,0,W,H);
+  let id;
+  try{ id=ctx.getImageData(0,0,W,H); }catch(e){ return {canvas:cv, brand:'#b8b2a6'}; }
+  const d=id.data, N=W*H;
+  // 1) гистограмма грубых бинов 4×4×4 → топ-6 цветов = палитра
+  const cnt=new Float64Array(64), rs=new Float64Array(64), gs=new Float64Array(64), bs=new Float64Array(64);
+  for(let i=0;i<N;i++){
+    const p=i*4, bin=(d[p]>>6)*16+(d[p+1]>>6)*4+(d[p+2]>>6);
+    cnt[bin]++; rs[bin]+=d[p]; gs[bin]+=d[p+1]; bs[bin]+=d[p+2];
+  }
+  const order=[...cnt.keys()].sort((a,b)=>cnt[b]-cnt[a]).filter(b=>cnt[b]>0).slice(0,6);
+  const cl=v=>v<0?0:v>255?255:Math.round(v);
+  const pal=order.map(b=>{
+    let r=rs[b]/cnt[b], g=gs[b]/cnt[b], bb=bs[b]/cnt[b];
+    const gray=0.299*r+0.587*g+0.114*bb;
+    r=gray+(r-gray)*1.45; g=gray+(g-gray)*1.45; bb=gray+(bb-gray)*1.45;  // сочность палитры
+    r=(r-128)*1.12+128; g=(g-128)*1.12+128; bb=(bb-128)*1.12+128;        // лёгкий контраст
+    return [cl(r),cl(g),cl(bb)];
+  });
+  // 2) каждый пиксель — в ближайший цвет палитры: плоские сочные области.
+  // внутренних тёмных линий НЕ рисуем — они мазали буквы и логотипы;
+  // комиксный контур остаётся только снаружи модели (вывернутый цилиндр)
+  for(let i=0;i<N;i++){
+    const p=i*4; let best=0, bd=1e9;
+    for(let k=0;k<pal.length;k++){
+      const dr=d[p]-pal[k][0], dg=d[p+1]-pal[k][1], db=d[p+2]-pal[k][2];
+      const dist=dr*dr*2+dg*dg*3+db*db;          // взвешенно по восприятию
+      if(dist<bd){ bd=dist; best=k; }
+    }
+    d[p]=pal[best][0]; d[p+1]=pal[best][1]; d[p+2]=pal[best][2];
+  }
+  ctx.putImageData(id,0,0);
+  // цвет бренда — ДОМИНИРУЮЩИЙ оттенок: самый частый из мало-мальски
+  // цветных (розовая банка остаётся розовой, даже если графика зелёная)
+  let brand='#b8b2a6', bestScore=0;
+  pal.forEach((c,k)=>{
+    const mx=Math.max(...c), mn=Math.min(...c);
+    if(mx-mn>25 && mx>55 && cnt[order[k]]>bestScore){ bestScore=cnt[order[k]]; brand=`rgb(${c[0]},${c[1]},${c[2]})`; }
+  });
+  return {canvas:cv, brand};
+}
+
+// ШАГ 5: этикетка — только передняя дуга, остальное цвет бренда
+function buildCanTexture(img){
+  const st=stylizeTexture(extractLabel(img));
+  const FRONT=0.55;
+  const pw=st.canvas.width, ph=st.canvas.height;
+  const cw=Math.round(pw/FRONT), x0=Math.round((cw-pw)/2);
+  const cv=document.createElement('canvas'); cv.width=cw; cv.height=ph;
+  const ctx=cv.getContext('2d');
+  ctx.fillStyle=st.brand; ctx.fillRect(0,0,cw,ph);
+  ctx.drawImage(st.canvas,x0,0);
+  const fade=Math.round(pw*0.12);                            // плавный переход в бренд-цвет
+  const gl=ctx.createLinearGradient(x0,0,x0+fade,0);
+  gl.addColorStop(0,st.brand); gl.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=gl; ctx.fillRect(x0,0,fade,ph);
+  const gr=ctx.createLinearGradient(x0+pw,0,x0+pw-fade,0);
+  gr.addColorStop(0,st.brand); gr.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=gr; ctx.fillRect(x0+pw-fade,0,fade,ph);
+  const tex=new THREE.CanvasTexture(cv);
+  tex.colorSpace=THREE.SRGBColorSpace;
+  tex.wrapS=tex.wrapT=THREE.ClampToEdgeWrapping;             // NPOT-безопасно
+  tex.magFilter=THREE.NearestFilter;                         // пиксельный хруст PS1
+  tex.minFilter=THREE.LinearFilter;
+  return tex;
+}
+
+// ШАГИ 3+4: low-poly банка (20 граней, flat shading) с toon-светом
+// и толстой чёрной обводкой (вывернутый цилиндр)
+const SEG=20, R=0.62, BODY=1.7;
+function buildCanGroup(img){
+  const grad=toonGradient();
+  const group=new THREE.Group();
+  group.rotation.x=0.12; group.position.y=0.035;
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(R,R,BODY,SEG),
+    new THREE.MeshToonMaterial({map:buildCanTexture(img), gradientMap:grad, flatShading:true}));
+  // у цилиндра середина текстуры (наша этикетка) приходится на -Z, спиной
+  // к камере — разворачиваем банку логотипом к зрителю
+  body.rotation.y=Math.PI;
+  group.add(body);
+  // чёрной обводки-силуэта больше нет: на светлом фоне она выглядела
+  // жирной кляксой вокруг банки; объём дают toon-свет и свечение тира
+  const metal=new THREE.MeshToonMaterial({color:0xc7ccd2, gradientMap:grad, flatShading:true});
+  const dark =new THREE.MeshToonMaterial({color:0x6b7075, gradientMap:grad, flatShading:true});
+  const lid=new THREE.Mesh(new THREE.CylinderGeometry(R*0.86,R,0.16,SEG), metal);
+  lid.position.y=BODY/2+0.07; group.add(lid);
+  const rimTop=new THREE.Mesh(new THREE.TorusGeometry(R*0.84,0.035,6,SEG), dark);
+  rimTop.rotation.x=Math.PI/2; rimTop.position.y=BODY/2+0.15; group.add(rimTop);
+  const base=new THREE.Mesh(new THREE.CylinderGeometry(R,R*0.92,0.14,SEG), metal);
+  base.position.y=-BODY/2-0.05; group.add(base);
+  group.userData.grad=grad;
+  return group;
+}
+function disposeGroup(group){
+  group.traverse(o=>{
+    if(o.geometry) o.geometry.dispose();
+    if(o.material){ if(o.material.map)o.material.map.dispose(); o.material.dispose(); }
+  });
+  if(group.userData.grad) group.userData.grad.dispose();
+}
+function addLights(scene){
+  scene.add(new THREE.HemisphereLight(0xfff6e0,0x6a5a48,0.75));
+  const key=new THREE.DirectionalLight(0xffffff,1.05); key.position.set(2,3,4); scene.add(key);
+  const rim=new THREE.DirectionalLight(0xffd9a0,0.85); rim.position.set(-3,1.5,-3); scene.add(rim);
+}
+
+// живая банка: автоповорот + лёгкое покачивание, можно крутить рукой.
+// все меши создаются синхронно — асинхронное добавление не рендерится
+window.mountCan3D=function(container, img){
+  if(container.__can3d) return;
+  const W=()=>container.clientWidth||300, H=()=>container.clientHeight||300;
+  const renderer=new THREE.WebGLRenderer({alpha:true, antialias:true, preserveDrawingBuffer:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.setSize(W(),H());
+  container.appendChild(renderer.domElement);
+
+  const scene=new THREE.Scene();
+  const camera=new THREE.PerspectiveCamera(32, W()/H(), 0.1, 100);
+  // data-dist у контейнера приближает камеру (банка крупнее, «вылезает» из рамки)
+  const dist=parseFloat(container.dataset&&container.dataset.dist)||4.1;
+  camera.position.set(0,0.06,dist);
+  addLights(scene);
+  const group=buildCanGroup(img);
+  scene.add(group);
+  container.classList.remove('loading');
+
+  const controls=new OrbitControls(camera,renderer.domElement);
+  controls.enablePan=false; controls.enableZoom=false;
+  controls.enableDamping=true; controls.dampingFactor=0.08;
+  controls.autoRotate=true; controls.autoRotateSpeed=2.2;
+  controls.minPolarAngle=Math.PI*0.30; controls.maxPolarAngle=Math.PI*0.70;
+
+  let raf=0;
+  const baseY=group.position.y, t0=performance.now();
+  const tick=()=>{
+    raf=requestAnimationFrame(tick);
+    group.position.y=baseY+Math.sin((performance.now()-t0)*0.0014)*0.045;  // покачивание
+    controls.update(); renderer.render(scene,camera);
+  };
+  tick();
+
+  const ro=new ResizeObserver(()=>{ camera.aspect=W()/H(); camera.updateProjectionMatrix(); renderer.setSize(W(),H()); });
+  ro.observe(container);
+
+  container.__can3d={
+    destroy(){
+      cancelAnimationFrame(raf); ro.disconnect(); controls.dispose();
+      disposeGroup(group); renderer.dispose();
+      if(renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement);
+      delete container.__can3d;
+    }
+  };
+};
+window.unmountCan3D=function(container){ if(container&&container.__can3d) container.__can3d.destroy(); };
+
+// статичные банки для карточек ленты: один общий офскрин-рендерер
+// выдаёт PNG-снапшоты (десятки живых WebGL-контекстов браузер не даст).
+// кеш по URL фото; очередь — рендерим по одному
+let snapR=null, snapScene=null, snapCam=null;
+function snapInit(){
+  if(snapR) return;
+  snapR=new THREE.WebGLRenderer({alpha:true, antialias:true, preserveDrawingBuffer:true});
+  snapR.setSize(340,400);
+  snapScene=new THREE.Scene();
+  addLights(snapScene);
+  snapCam=new THREE.PerspectiveCamera(32,340/400,0.1,100);
+  snapCam.position.set(0,0.06,4.15);
+  snapCam.lookAt(0,0,0);
+}
+const snapCache={};
+let snapQueue=Promise.resolve();
+window.canSnapshot=function(src){
+  if(snapCache[src]) return snapCache[src];
+  const p=snapQueue=snapQueue.catch(()=>{}).then(()=>new Promise((resolve,reject)=>{
+    const img=new Image(); img.crossOrigin='anonymous';
+    img.onload=()=>{
+      try{
+        snapInit();
+        const group=buildCanGroup(img);
+        group.rotation.y=-0.55;             // статичный трёхчетвертной ракурс
+        snapScene.add(group);
+        snapR.render(snapScene,snapCam);
+        const url=snapR.domElement.toDataURL('image/png');
+        snapScene.remove(group); disposeGroup(group);
+        resolve(url);
+      }catch(e){ reject(e); }
+    };
+    img.onerror=()=>reject(new Error('image load failed'));
+    img.src=src;
+  }));
+  snapCache[src]=p.catch(()=>{ delete snapCache[src]; return null; });  // null → фолбэк на фото
+  return snapCache[src];
+};
+window.__can3dReady=true;
+</script>
+<style>
+:root {
+  /* комикс-палитра: тёплая бумага + чернильные контуры */
+  --bg:       #f6ead0;
+  --s1:       #fffaf0;
+  --s2:       #f6ecd8;
+  --s3:       #ecdcba;
+  --ink:      #1a140e;
+  --border:   rgba(43,33,23,0.16);
+  --border2:  rgba(43,33,23,0.38);
+  --text:     #2b2117;
+  --text2:    #71604b;
+  --text3:    #a38b6c;
+  --acc:      #ff7a1f;
+  --acc2:     #e2641a;
+  --radius:   14px;
+  --radius-sm:10px;
+  --bottomnav-h: 0px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;padding-bottom:var(--bottomnav-h)}
+body::before{ /* комикс-фон: тёплые цветные пятна, медленно дышат */
+  content:'';position:fixed;inset:-12%;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(42% 34% at 8% 4%,   rgba(255,170,40,0.26), transparent 70%),
+    radial-gradient(38% 30% at 94% 10%, rgba(64,190,160,0.20), transparent 70%),
+    radial-gradient(46% 36% at 78% 96%, rgba(255,110,150,0.18), transparent 70%),
+    radial-gradient(34% 28% at 12% 92%, rgba(120,130,255,0.15), transparent 70%);
+  animation:bg-drift 26s ease-in-out infinite alternate;
+}
+body::after{ /* растровые точки + разбросанные комикс-каракули: молнии, искры, кресты */
+  content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='380' height='380'%3E%3Cg fill='none' stroke='%232b2117' stroke-width='2' opacity='0.09'%3E%3Ccircle cx='86' cy='300' r='12' stroke-dasharray='4 5'/%3E%3Cpath d='M178 192 h16 M186 184 v16'/%3E%3C/g%3E%3Cg fill='%232b2117' opacity='0.09'%3E%3Cpath d='M46 48 l-9 15 h6 l-4 13 l12 -16 h-6 l5 -12 z'/%3E%3Cpath d='M306 78 l2.5 7.5 l7.5 2.5 l-7.5 2.5 l-2.5 7.5 l-2.5 -7.5 l-7.5 -2.5 l7.5 -2.5 z'/%3E%3Cpath d='M322 296 l2 6 l6 2 l-6 2 l-2 6 l-2 -6 l-6 -2 l6 -2 z'/%3E%3C/g%3E%3Cg fill='%23e2641a' opacity='0.14'%3E%3Cpath d='M236 332 l-7 12 h5 l-3 10 l9 -12 h-5 l4 -10 z'/%3E%3Cpath d='M132 110 l2 6 l6 2 l-6 2 l-2 6 l-2 -6 l-6 -2 l6 -2 z'/%3E%3C/g%3E%3C/svg%3E"),
+    radial-gradient(rgba(43,33,23,0.06) 1.1px, transparent 1.2px);
+  background-size:380px 380px, 17px 17px;
+}
+@keyframes bg-drift{
+  from{transform:translate(0,0) scale(1)}
+  to  {transform:translate(2%,-3%) scale(1.08)}
+}
+/* display font for the loud headings */
+.logo,.feed-title,.create-title,.auth-wrap h2,.expand-name,.profile-name,.expand-score,.tl-label.tl-letter{
+  font-family:'Unbounded','Segoe UI',sans-serif;
+}
+.feed-title{
+  position:relative;display:inline-block;
+  color:var(--ink);text-transform:uppercase;line-height:1.05;
+  padding:20px 38px;
+  text-shadow:2.5px 2.5px 0 rgba(255,246,227,0.9);
+  /* огромный комиксный взрыв за заголовком */
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 90' preserveAspectRatio='none'%3E%3Cpolygon fill='%231a140e' points='197,45 162,53 186,69 146,64 150,84 117,70 100,88 84,71 49,83 57,63 14,68 40,52 2,45 39,37 17,22 56,27 49,7 84,20 100,2 117,19 151,6 145,27 185,21 161,37'/%3E%3Cg transform='translate(100 45) scale(0.85) translate(-100 -45)'%3E%3Cpolygon fill='%23ff8a2a' points='197,45 162,53 186,69 146,64 150,84 117,70 100,88 84,71 49,83 57,63 14,68 40,52 2,45 39,37 17,22 56,27 49,7 84,20 100,2 117,19 151,6 145,27 185,21 161,37'/%3E%3C/g%3E%3Cg transform='translate(100 45) scale(0.58) translate(-100 -45)'%3E%3Cpolygon fill='%23ffd54a' opacity='0.7' points='197,45 162,53 186,69 146,64 150,84 117,70 100,88 84,71 49,83 57,63 14,68 40,52 2,45 39,37 17,22 56,27 49,7 84,20 100,2 117,19 151,6 145,27 185,21 161,37'/%3E%3C/g%3E%3C/svg%3E") no-repeat center/100% 100%;
+}
+.feed-title::before{ /* золотая искра слева */
+  content:'';position:absolute;top:-11px;left:-26px;width:19px;height:19px;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath fill='%23dba008' d='M10 0 l2.4 7.6 L20 10 l-7.6 2.4 L10 20 l-2.4 -7.6 L0 10 l7.6 -2.4 Z'/%3E%3C/svg%3E") no-repeat center/contain;
+  transform:rotate(-12deg);
+}
+.feed-title::after{ /* молния-наклейка справа */
+  content:'';position:absolute;top:-14px;right:-27px;width:22px;height:30px;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 32'%3E%3Cpath fill='%23e2641a' d='M15 0 L3 18 h7 L6 32 L21 12 h-8 L15 0 Z'/%3E%3C/svg%3E") no-repeat center/contain;
+  transform:rotate(14deg);
+}
+
+/* NAV */
+nav{position:sticky;top:0;z-index:100;background:rgba(255,250,240,0.88);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-bottom:2px solid var(--ink);padding:0 1.5rem;height:56px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.logo{font-size:15px;font-weight:800;letter-spacing:0.02em;color:var(--text);text-decoration:none;display:flex;align-items:center;gap:7px;white-space:nowrap;background:var(--s1);border:3px solid var(--ink);border-radius:12px;padding:4px 12px;box-shadow:3px 3px 0 var(--ink);transform:rotate(-1.2deg)}
+.logo-txt{ /* огненный градиент названия */
+  background:linear-gradient(180deg,#ffd54a 10%,#ff7a18 55%,#ff3d3d 95%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.logo-bolt{width:21px;height:21px;flex-shrink:0;filter:drop-shadow(0 0 8px rgba(255,165,60,0.65));animation:bolt-flicker 4s ease-in-out infinite}
+@keyframes bolt-flicker{
+  0%,100%{filter:drop-shadow(0 0 8px rgba(255,165,60,0.65))}
+  48%{filter:drop-shadow(0 0 8px rgba(255,165,60,0.65))}
+  50%{filter:drop-shadow(0 0 16px rgba(255,213,74,1))}
+  52%{filter:drop-shadow(0 0 8px rgba(255,165,60,0.65))}
+}
+.nav-tabs{display:flex;gap:4px;background:var(--s1);border:4px solid var(--ink);border-radius:22px;padding:3px;box-shadow:4px 4px 0 var(--ink)}
+.nav-tab{padding:6px 16px;border-radius:16px;font-size:13.5px;font-weight:600;color:var(--text2);cursor:pointer;border:none;background:transparent;display:flex;align-items:center;gap:6px;transition:all 0.2s;white-space:nowrap}
+.nav-tab:hover{color:var(--text)}
+.nav-tab.active{background:linear-gradient(135deg,#ffc94d,#ff8a2a);color:#2b1605;font-weight:700}
+.nav-tab i{font-size:15px}
+
+/* BOTTOM NAV (mobile app feel) */
+.bottom-nav{display:none;position:fixed;bottom:0;left:0;right:0;z-index:150;background:rgba(255,250,240,0.94);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:2px solid var(--ink);padding:6px 4px calc(6px + env(safe-area-inset-bottom));justify-content:space-around}
+.bnav-item{display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;color:var(--text3);font-size:10px;font-weight:500;cursor:pointer;padding:4px 12px;border-radius:10px;transition:color 0.15s;min-width:60px}
+.bnav-item i{font-size:22px}
+.bnav-item.active{color:var(--acc2)}
+.bnav-item.bnav-add i{background:linear-gradient(135deg,#ffc94d,#ff8a2a);color:#2b1605;border:2px solid var(--ink);border-radius:12px;padding:2px 14px;font-size:20px;box-shadow:2px 2px 0 var(--ink)}
+@media(max-width:700px){
+  :root{--bottomnav-h:64px}
+  .bottom-nav{display:flex}
+  .nav-tabs{display:none}
+  #nav-actions .hide-mobile{display:none}
+  nav{padding:0 1rem}
+}
+
+/* BUTTONS — псевдо-3D: толстенный чернильный контур + непрозрачная
+   смещённая тень; нажатие физически вдавливает кнопку */
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 18px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;transition:all 0.12s;border:4px solid var(--ink);background:var(--s1);color:var(--text);box-shadow:5px 5px 0 var(--ink)}
+.btn:hover{background:#fff3da;transform:translate(-1px,-1px);box-shadow:6px 6px 0 var(--ink)}
+.btn:active{transform:translate(3px,3px);box-shadow:2px 2px 0 var(--ink)}
+.btn-primary{background:linear-gradient(180deg,#ffd56b,#ff8a2a 70%);color:#2b1605;font-weight:800}
+.btn-primary:hover{background:linear-gradient(180deg,#ffe089,#ff9a45 70%);color:#2b1605}
+.btn-sm{padding:6px 13px;font-size:13px;border-width:3px;box-shadow:4px 4px 0 var(--ink)}
+.btn-sm:active{transform:translate(3px,3px);box-shadow:1px 1px 0 var(--ink)}
+.btn-ghost{border:none;box-shadow:none;background:transparent}
+.btn-ghost:hover{transform:none;box-shadow:none;background:var(--s2)}
+
+/* SEGMENTED CONTROL — механический тумблер игрового автомата */
+.seg{display:inline-flex;gap:4px;background:var(--s1);border:4px solid var(--ink);border-radius:14px;padding:4px;box-shadow:5px 5px 0 var(--ink)}
+.seg button{padding:8px 16px;border-radius:9px;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.03em;color:var(--text2);background:transparent;border:none;cursor:pointer;display:flex;align-items:center;gap:6px;transition:all 0.12s}
+.seg button:active{transform:translateY(2px)}
+.seg button.active{background:linear-gradient(180deg,#ffd56b,#ff8a2a 70%);color:#2b1605;box-shadow:inset 0 -3px 0 rgba(26,20,14,0.35), inset 0 2px 0 rgba(255,255,255,0.45)}
+.seg button i{font-size:14px}
+
+/* PAGES */
+.page{display:none;min-height:calc(100vh - 56px)}
+.page.active{display:block}
+
+/* FEED */
+.feed-header{padding:2rem 1.5rem 1.5rem;max-width:1100px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.feed-title{font-size:clamp(26px,3.6vw,38px);font-weight:900}
+.feed-sub{display:inline-block;background:var(--ink);color:#ffe9b8;font-size:12.5px;font-weight:600;padding:3px 13px;border-radius:999px;transform:rotate(-1.4deg);margin-top:9px;box-shadow:2px 2px 0 rgba(43,33,23,0.3)}
+.cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(164px,1fr));gap:18px;padding:0 1.5rem 3rem;max-width:1100px;margin:0 auto}
+@media(max-width:480px){.cards-grid{grid-template-columns:repeat(2,1fr);gap:12px;padding:0 0.85rem 3rem}.feed-header{padding:1.5rem 1rem 1rem}}
+.empty-state{text-align:center;padding:5rem 1rem;color:var(--text2)}
+.empty-state i{font-size:48px;display:block;margin-bottom:12px;color:var(--text3)}
+.empty-state p{font-size:15px}
+
+/* ─── COLLECTIBLE CARD (коллекционная карта энергетика) ────── */
+.rcard{
+  --tc:#8a8478;
+  position:relative;
+  /* рамка и фон подкрашены цветом редкости — D-картон против S-золота */
+  background:linear-gradient(170deg,#fffaf0 30%, color-mix(in srgb, var(--tc) 13%, #f8eed6));
+  border:2.5px solid var(--ink);
+  border-radius:14px;
+  overflow:hidden;
+  cursor:pointer;
+  box-shadow:0 3px 0 rgba(43,33,23,0.4);
+  transform:rotate(var(--rot,0deg));        /* карты лежат вразброс, как на столе */
+  transition:transform 0.25s cubic-bezier(.2,.8,.3,1.2), box-shadow 0.25s;
+}
+/* S-редкость: голо-перелив бежит по карте сам, как по фольгированной */
+.rcard.tier-glow::before{
+  content:'';position:absolute;inset:0;z-index:3;pointer-events:none;border-radius:inherit;
+  background:linear-gradient(115deg,transparent 30%,rgba(255,215,90,0.22) 45%,rgba(255,255,255,0.34) 50%,rgba(255,215,90,0.22) 55%,transparent 70%);
+  background-size:280% 100%;
+  animation:holo-sweep 3.4s linear infinite;
+}
+@keyframes holo-sweep{from{background-position:120% 0}to{background-position:-120% 0}}
+.rcard.tier-glow .rcard-art::before,
+.rcard.tier-glow .rcard-art::after{
+  content:'';position:absolute;width:14px;height:14px;z-index:4;pointer-events:none;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath fill='%23ffd54a' stroke='%232b2117' stroke-width='1' d='M10 0 l2.4 7.6 L20 10 l-7.6 2.4 L10 20 l-2.4 -7.6 L0 10 l7.6 -2.4 Z'/%3E%3C/svg%3E") center/contain no-repeat;
+  animation:twinkle 1.8s ease-in-out infinite;
+}
+.rcard.tier-glow .rcard-art::before{top:10px;right:12px}
+.rcard.tier-glow .rcard-art::after{bottom:14px;left:10px;width:10px;height:10px;animation-delay:-0.9s}
+@keyframes twinkle{0%,100%{opacity:0.25;transform:scale(0.7)}50%{opacity:1;transform:scale(1.15) rotate(22deg)}}
+/* раздача из бустера: карты влетают веером с задержкой по очереди */
+.rcard.deal{animation:deal-in 0.55s cubic-bezier(.2,.8,.3,1.15) backwards}
+@keyframes deal-in{
+  from{opacity:0;transform:translateY(32px) rotate(calc(var(--rot,0deg) + 5deg)) scale(0.62)}
+  to  {opacity:1;transform:rotate(var(--rot,0deg))}
+}
+/* ─── ГРАДАЦИЯ РЕДКОСТИ ───────────────────────────────────────
+   S — золото с голо-переливом (tier-glow выше), A — оранжевое
+   сияние, B — красный неон, C — кислотные акценты, D — потрёпанная
+   уценённая картонка с рваной рамкой */
+.rcard.lA{animation:aura-a 2.8s ease-in-out infinite}
+@keyframes aura-a{
+  0%,100%{box-shadow:0 3px 0 rgba(26,20,14,0.4), 0 0 16px rgba(255,140,40,0.35)}
+  50%    {box-shadow:0 3px 0 rgba(26,20,14,0.4), 0 0 32px rgba(255,140,40,0.62)}
+}
+.rcard.lB{animation:aura-b 3.2s ease-in-out infinite}
+@keyframes aura-b{
+  0%,100%{box-shadow:0 3px 0 rgba(26,20,14,0.4), 0 0 14px rgba(255,60,60,0.32)}
+  50%    {box-shadow:0 3px 0 rgba(26,20,14,0.4), 0 0 28px rgba(255,60,60,0.58)}
+}
+.rcard.lA:hover,.rcard.lB:hover{animation:none}
+.rcard.lC{box-shadow:0 3px 0 rgba(26,20,14,0.4), 0 0 16px rgba(150,230,40,0.4)}
+.rcard.lC .rcard-art{box-shadow:inset 0 0 0 3px rgba(120,200,30,0.6)}
+.rcard.lD{border-style:dashed;filter:saturate(0.8)}
+.rcard.lD .rcard-art{background:
+  radial-gradient(rgba(90,60,30,0.16) 1px, transparent 1.4px) 0 0/8px 8px,
+  linear-gradient(180deg,#efe2c0,#ddcba0)}
+.rcard.lD .rcard-name{background:#5c5347}
+
+/* наклейки-бабблы, перекрывают банку */
+.csticker{position:absolute;z-index:6;font-family:'Unbounded','Segoe UI',sans-serif;font-size:8.5px;font-weight:700;letter-spacing:0.04em;padding:4px 10px;border:2px solid var(--ink);border-radius:4px 14px 4px 14px;box-shadow:2px 2px 0 var(--ink);pointer-events:none}
+.csticker.snew{top:8px;right:8px;background:#ffd54a;color:#2b1605;transform:rotate(7deg)}
+.csticker.shot{top:8px;right:8px;background:#ff4d63;color:#fff;transform:rotate(-6deg)}
+.csticker.strash{top:8px;right:8px;background:#6b7a2a;color:#f4ffd0;transform:rotate(5deg)}
+.csticker.sworn{top:8px;right:8px;background:#9a948a;color:#1a140e;transform:rotate(-8deg)}
+.csticker+.csticker{top:40px;right:4px}
+.csticker+.csticker+.csticker{top:72px;right:10px}
+.rcard:hover{
+  transform:translateY(-6px) rotate(0deg) scale(1.02);   /* под курсором выпрямляется */
+  box-shadow:0 9px 20px rgba(43,33,23,0.22), 0 0 26px color-mix(in srgb, var(--tc) 30%, transparent);
+}
+.rcard::after{ /* holo-shine sweep, like inspecting a card in the gallery */
+  content:'';position:absolute;inset:0;pointer-events:none;z-index:4;border-radius:inherit;
+  background:linear-gradient(105deg,transparent 38%,rgba(255,255,255,0.22) 45%,rgba(255,255,255,0.5) 50%,rgba(255,255,255,0.22) 55%,transparent 62%);
+  transform:translateX(-130%);
+}
+.rcard:hover::after{transform:translateX(130%);transition:transform 0.7s ease}
+/* S-тир мягко светится золотом, как легендарка */
+.rcard.tier-glow{animation:tier-pulse 2.6s ease-in-out infinite}
+@keyframes tier-pulse{
+  0%,100%{box-shadow:0 2px 0 rgba(43,33,23,0.3), 0 0 14px rgba(255,205,70,0.35)}
+  50%    {box-shadow:0 2px 0 rgba(43,33,23,0.3), 0 0 30px rgba(255,215,90,0.6)}
+}
+.rcard.tier-glow:hover{animation:none}
+
+/* буква тира — вымпел в углу */
+.rcard-letter{
+  position:absolute;top:-1px;left:9px;z-index:5;width:30px;padding:5px 0 9px;
+  color:#fff;font-family:'Unbounded','Segoe UI',sans-serif;font-size:14px;font-weight:700;text-align:center;
+  border:1.5px solid var(--ink);border-top:none;border-radius:0 0 2px 2px;
+  clip-path:polygon(0 0,100% 0,100% 76%,50% 100%,0 76%);
+  text-shadow:0 1px 0 rgba(0,0,0,0.35);
+  filter:drop-shadow(1.5px 1.5px 0 rgba(43,33,23,0.4));
+}
+.rcard-letter.lS{color:#fffbe8;text-shadow:0 0 7px rgba(255,255,255,0.95),0 1px 0 rgba(0,0,0,0.3)}
+
+/* арт-зона: бумага + полутоновые точки, за банкой комикс-взрыв */
+.rcard-art{
+  position:relative;aspect-ratio:1/1.06;overflow:hidden;
+  background:
+    radial-gradient(rgba(43,33,23,0.12) 1px, transparent 1.35px) 0 0/9px 9px,
+    linear-gradient(180deg,#fdf4dd,#f2e3c0);
+  border-bottom:2px solid var(--ink);
+  box-shadow:inset 0 0 0 3px color-mix(in srgb, var(--tc) 38%, transparent);  /* внутренняя рамка редкости */
+  display:flex;align-items:center;justify-content:center;
+}
+.rcard-art .burst{position:absolute;inset:5%;width:90%;height:90%;z-index:1}
+.rcard.tier-glow .rcard-art .burst{filter:drop-shadow(0 0 10px rgba(255,225,120,0.85))}
+.rcard-art img{
+  position:relative;z-index:2;width:78%;height:92%;object-fit:contain;
+  filter:drop-shadow(0 6px 7px rgba(43,33,23,0.35)) drop-shadow(0 0 13px color-mix(in srgb, var(--tc) 50%, transparent));
+  animation:can-bob 4.5s ease-in-out infinite;
+}
+@keyframes can-bob{0%,100%{transform:translateY(2px)}50%{transform:translateY(-4px)}}
+.rcard:nth-child(2n) .rcard-art img{animation-delay:-2.2s}  /* банки качаются вразнобой */
+.rcard:nth-child(3n) .rcard-art img{animation-delay:-1.1s}
+.can-snap:not(.ready){visibility:hidden}                    /* пока снапшот не готов */
+.rcard-art .snap-wait{position:absolute;z-index:2;width:26px;height:26px;border:3px solid var(--border2);border-top-color:var(--acc2);border-radius:50%;animation:spin 0.8s linear infinite}
+.rcard-art .rcard-photo-icon{position:relative;z-index:2}
+.rcard-photo-icon{font-size:38px;color:rgba(43,33,23,0.4)}
+/* 3D-сцена на наведении: поверх фото, клики пропускает сквозь себя */
+.rcard-3d{position:absolute;inset:-4% 0;z-index:3;display:none;pointer-events:none}
+.rcard-3d.active{display:block}
+.rcard-3d canvas{display:block;width:100%!important;height:100%!important}
+
+/* инфо-зона: название на чернильной ленте, оценка, бейдж */
+.rcard-info{padding:9px 9px 5px;text-align:center}
+.rcard-name{font-family:'Unbounded','Segoe UI',sans-serif;font-size:10.5px;font-weight:600;background:var(--ink);color:#ffeec9;padding:4px 10px;border-radius:5px;transform:rotate(-1.2deg);display:block;margin:-16px 4px 0;position:relative;z-index:4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:2px 2px 0 rgba(43,33,23,0.3)}
+.rcard-score{font-size:17px;font-weight:800;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:5px;line-height:1}
+.rcard-score i{color:#f0a51f;font-size:16px;filter:drop-shadow(1px 1px 0 rgba(43,33,23,0.5))}
+.rcard-score small{font-size:10px;color:var(--text2);font-weight:500}
+.rcard-info .tier-badge{font-size:9.5px;padding:2px 9px;margin-top:6px;border-width:1px}
+
+/* подвал: автор и лайки, минимум */
+.rcard-foot{display:flex;align-items:center;gap:6px;padding:7px 10px 8px;margin-top:5px;border-top:1.5px dashed var(--border2);font-size:11px;color:var(--text2)}
+.rcard-foot .ava{width:20px;height:20px;border-radius:50%;background:var(--s3);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--text2);flex-shrink:0}
+.rcard-foot .auth{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-decoration:none;color:var(--text2)}
+.rcard-foot .auth:hover{color:var(--text)}
+.rcard-foot .has-desc{color:var(--text3);font-size:12px}
+.rcard-foot .like-btn{margin-left:auto;font-size:11.5px}
+.rcard-foot .like-btn i{font-size:14px}
+
+/* ─── RARITY GEM (Hearthstone-style crystal) ─────────────── */
+.rarity-gem{
+  position:absolute;top:-9px;left:50%;margin-left:-9px;width:18px;height:18px;
+  transform:rotate(45deg);border-radius:5px;z-index:3;
+  background:
+    radial-gradient(circle at 30% 28%, rgba(255,255,255,0.9), rgba(255,255,255,0) 42%),
+    radial-gradient(circle at 50% 55%, var(--tc) 25%, color-mix(in srgb, var(--tc) 40%, #000) 95%);
+  border:1px solid color-mix(in srgb, var(--tc) 60%, #fff 20%);
+  box-shadow:
+    0 0 12px color-mix(in srgb, var(--tc) 80%, transparent),
+    inset 0 0 5px rgba(255,255,255,0.4);
+}
+.rarity-gem::after{ /* tiny inner facet line */
+  content:'';position:absolute;inset:3px;border-radius:3px;
+  border:1px solid rgba(255,255,255,0.22);
+}
+
+.expand-gem{top:auto;bottom:9px;width:22px;height:22px;margin-left:-11px}
+
+/* RATING BARS (в развёрнутом обзоре) */
+.rt-list{display:flex;flex-direction:column;gap:7px}
+.stat-mini-row{display:flex;align-items:center;gap:6px}
+.stat-mini-row.neutral{opacity:0.55}
+.stat-mini-label{font-size:10px;color:var(--text2);width:88px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar-mini{flex:1;height:3px;background:var(--s3);border-radius:2px;overflow:hidden}
+.bar-mini-fill{height:100%;border-radius:2px;transition:width 0.3s}
+.stat-mini-val{font-size:11px;font-weight:600;width:16px;text-align:right}
+
+/* BADGES / ACTION BUTTONS (карта + развёрнутый обзор) */
+.tier-badge{font-size:12px;font-weight:700;padding:4px 12px;border-radius:20px;letter-spacing:0.04em;border:1.5px solid currentColor;transform:rotate(-2deg);display:inline-block}
+.like-btn{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--text2);background:none;border:none;cursor:pointer;padding:0;transition:color 0.15s}
+.like-btn:hover{color:#d6336c}
+.like-btn.liked{color:#d6336c;text-shadow:0 0 12px rgba(214,51,108,0.35)}
+.like-btn.liked i{animation:like-pop 0.35s cubic-bezier(.2,.8,.3,1.4)}
+@keyframes like-pop{0%{transform:scale(0.3)}55%{transform:scale(1.55) rotate(-8deg)}100%{transform:scale(1)}}
+.like-btn i{font-size:16px}
+.edit-btn{margin-left:auto;background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px;padding:0;transition:color 0.15s}
+.edit-btn:hover{color:var(--acc2)}
+.delete-btn{background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px;padding:0;transition:color 0.15s}
+.delete-btn:hover{color:#e24b4a}
+
+/* ─── EXPANDED CARD OVERLAY ───────────────────────────────── */
+#expand-overlay{position:fixed;inset:0;z-index:300;display:none;align-items:flex-start;justify-content:center;padding:4vh 1rem 2rem;overflow-y:auto}
+#expand-overlay .expand-backdrop{position:fixed;inset:0;background:rgba(43,33,23,0.6);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);opacity:0;transition:opacity 0.35s}
+#expand-overlay.open .expand-backdrop{opacity:1}
+.expand-card{
+  --tc:#8a7a5c;
+  position:relative;width:min(540px,100%);
+  background:var(--s1);
+  border:2.5px solid var(--ink);
+  border-radius:18px;overflow:hidden;
+  box-shadow:
+    8px 10px 0 color-mix(in srgb, var(--tc) 50%, var(--ink)),
+    0 18px 60px rgba(43,33,23,0.35);
+  will-change:transform;
+}
+.expand-photo{
+  position:relative;height:min(46vh,380px);
+  background:
+    radial-gradient(rgba(43,33,23,0.11) 1px, transparent 1.35px) 0 0/11px 11px,
+    linear-gradient(180deg,#fdf4dd,#f2e3c0);
+  display:flex;align-items:center;justify-content:center;overflow:hidden;
+}
+/* рамка «арта»: банка в 3D рисуется поверх и выходит за неё — объём */
+.expand-frame{position:absolute;inset:9% 11%;border:2px solid rgba(43,33,23,0.45);border-radius:12px;z-index:1;pointer-events:none}
+.expand-photo .burst{position:absolute;inset:9% 12%;width:76%;height:82%;z-index:1}
+.expand-photo img{position:relative;z-index:2;width:78%;height:88%;object-fit:contain;filter:drop-shadow(0 10px 12px rgba(43,33,23,0.4))}
+.expand-photo .rcard-photo-icon{font-size:64px;position:relative;z-index:2}
+.can3d-btn{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);z-index:6;display:flex;align-items:center;gap:6px;background:rgba(20,16,11,0.8);backdrop-filter:blur(8px);border:1.5px solid rgba(255,246,227,0.35);border-radius:999px;padding:7px 15px;font-size:12px;font-weight:600;color:#fff6e3;cursor:pointer;transition:all 0.18s}
+.can3d-btn:hover{border-color:rgba(255,213,74,0.5);box-shadow:0 0 14px rgba(255,213,74,0.22)}
+.can3d-btn.active{color:#ffd54a;border-color:rgba(255,213,74,0.5)}
+.can3d-btn i{font-size:15px}
+.can3d-btn .ti-loader-2{animation:spin 0.8s linear infinite}
+.can3d-stage{position:absolute;inset:0;z-index:4;display:none;cursor:grab}
+.can3d-stage.active{display:block}
+/* в 3D-режиме плоское фото прячем (иначе торчит за банкой) + свечение по тиру */
+.expand-photo:has(.can3d-stage.active) > img{display:none}
+.expand-photo .can3d-stage{filter:drop-shadow(0 0 26px color-mix(in srgb, var(--tc) 60%, transparent))}
+.rcard-art:has(.rcard-3d.active) img.can-snap{visibility:hidden}
+.can3d-stage:active{cursor:grabbing}
+.can3d-stage canvas{display:block;width:100%!important;height:100%!important}
+.can3d-stage.loading::after{content:'';position:absolute;top:50%;left:50%;width:34px;height:34px;margin:-17px 0 0 -17px;border:3px solid var(--border2);border-top-color:var(--acc2);border-radius:50%;animation:spin 0.8s linear infinite}
+.can3d-stage.failed::after{content:'Не удалось загрузить 3D';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:12px;color:var(--text2)}
+.expand-close{position:absolute;top:12px;right:12px;width:34px;height:34px;border-radius:50%;background:rgba(20,16,11,0.7);backdrop-filter:blur(8px);border:1.5px solid rgba(255,246,227,0.35);color:#fff6e3;font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;transition:background 0.15s}
+.expand-close:hover{background:rgba(40,40,36,0.9)}
+.expand-tierbar{position:absolute;bottom:0;left:0;right:0;height:3px;background:linear-gradient(90deg, transparent, var(--tc), transparent)}
+.expand-body{padding:18px 20px 22px}
+.expand-headrow{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:4px}
+.expand-name{font-size:22px;font-weight:700;line-height:1.2}
+.expand-score{font-size:30px;font-weight:800;line-height:1;color:var(--tc);text-shadow:0 0 18px color-mix(in srgb, var(--tc) 45%, transparent);flex-shrink:0}
+.expand-score small{font-size:12px;color:var(--text2);font-weight:400;text-shadow:none}
+.expand-meta{font-size:13px;color:var(--text2);display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.expand-meta a{color:var(--text2);text-decoration:none}
+.expand-meta a:hover{color:var(--text)}
+.expand-stats{background:var(--s2);border:0.5px solid var(--border);border-radius:var(--radius);padding:14px}
+.expand-stats .rt-list{gap:9px}
+.expand-stats .stat-mini-label{font-size:11.5px;width:118px}
+.expand-stats .bar-mini{height:4px}
+.expand-stats .stat-mini-val{font-size:12.5px}
+.expand-desc{margin-top:16px;border-top:0.5px solid var(--border);padding-top:14px}
+.expand-desc-label{font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.expand-desc-label i{font-size:14px;color:var(--tc)}
+.expand-desc-text{font-size:14.5px;line-height:1.65;color:var(--text);white-space:pre-wrap;word-wrap:break-word}
+.expand-desc-text.muted{color:var(--text3);font-style:italic}
+.expand-footer{display:flex;align-items:center;gap:14px;margin-top:16px;border-top:0.5px solid var(--border);padding-top:14px}
+.expand-footer .like-btn{font-size:14px}
+.expand-footer .like-btn i{font-size:19px}
+/* staged reveal of the body content */
+.expand-reveal{opacity:0;transform:translateY(16px);animation:exp-reveal 0.5s cubic-bezier(.2,.8,.3,1) forwards}
+@keyframes exp-reveal{to{opacity:1;transform:none}}
+
+/* ─── DRINK AGGREGATE (сводный обзор энергетика из тирлиста) ── */
+.drev-list{margin-top:16px;border-top:2px dashed var(--border2);padding-top:14px}
+.drev{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1.5px solid var(--border);border-radius:10px;margin-bottom:8px;cursor:pointer;background:var(--s2);transition:transform 0.15s,box-shadow 0.15s,border-color 0.15s}
+.drev:hover{transform:translateY(-1px);border-color:var(--ink);box-shadow:2px 3px 0 rgba(43,33,23,0.35)}
+.drev-ava{width:30px;height:30px;border-radius:50%;background:var(--s3);border:1.5px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--text2);flex-shrink:0}
+.drev-info{min-width:0}
+.drev-user{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.drev-meta{font-size:11.5px;color:var(--text2)}
+.drev-right{margin-left:auto;text-align:right;flex-shrink:0}
+.drev-score{font-weight:700;font-size:15px}
+.drev-likes{font-size:11.5px;color:#d6336c;display:flex;align-items:center;gap:3px;justify-content:flex-end}
+.drev-likes i{font-size:11px}
+
+/* ─── TIERLIST ────────────────────────────────────────────── */
+.tl-wrap{max-width:1100px;margin:0 auto;padding:0 1.5rem 3rem}
+@media(max-width:420px){.tl-wrap{padding:0 0.75rem 3rem}}
+.tl-row{display:flex;background:var(--s1);border:2px solid var(--ink);border-radius:var(--radius);overflow:hidden;margin-bottom:12px;box-shadow:3px 4px 0 rgba(43,33,23,0.35)}
+.tl-label{width:108px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-align:center;font-weight:700;font-size:13px;padding:12px 8px;letter-spacing:0.03em}
+.tl-label small{font-weight:400;font-size:10px;opacity:0.75}
+@media(max-width:480px){.tl-label{width:78px;font-size:11px}}
+.tl-items{flex:1;display:flex;flex-wrap:wrap;gap:10px;padding:10px;min-height:96px;align-items:flex-start;align-content:flex-start}
+.tl-empty{color:var(--text3);font-size:12px;align-self:center;padding-left:6px}
+.tl-item{width:76px;cursor:pointer;text-align:center;transition:transform 0.2s}
+.tl-item:hover{transform:translateY(-3px) scale(1.05)}
+.tl-item-photo{position:relative;width:76px;height:76px;border-radius:10px;background:var(--s3);overflow:hidden;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);transition:border-color 0.2s,box-shadow 0.2s}
+.tl-item:hover .tl-item-photo{border-color:color-mix(in srgb, var(--tc,#7a7972) 80%, transparent);box-shadow:0 0 18px color-mix(in srgb, var(--tc,#7a7972) 30%, transparent)}
+.tl-item-photo img{width:100%;height:100%;object-fit:cover}
+.tl-item-photo i{font-size:26px;color:var(--text3)}
+.tl-item-marks{position:absolute;bottom:3px;right:3px;background:rgba(20,16,11,0.82);backdrop-filter:blur(6px);border-radius:6px;padding:1px 6px;font-size:10px;font-weight:600;color:#fff6e3;display:flex;align-items:center;gap:3px}
+.tl-item-marks i{font-size:9px;color:#ff6b95}
+.tl-item-score{position:absolute;top:3px;left:3px;background:rgba(20,16,11,0.82);backdrop-filter:blur(6px);border-radius:6px;padding:1px 6px;font-size:9px;font-weight:600;color:#e8dcc6}
+.tl-label.tl-letter{font-size:34px;font-weight:800;text-shadow:2.5px 2.5px 0 rgba(43,33,23,0.28);transform:rotate(-2deg)}
+.tl-label.tl-letter small{font-size:10px;font-weight:400;text-shadow:none;transform:none}
+.tl-item-name{font-size:10px;color:var(--text2);margin-top:5px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+
+/* CREATE PAGE */
+.create-wrap{max-width:860px;margin:0 auto;padding:2rem 1.5rem 3rem}
+.create-title{font-size:22px;font-weight:600;margin-bottom:6px}
+.create-sub{font-size:14px;color:var(--text2);margin-bottom:2rem}
+.create-grid{display:grid;grid-template-columns:1fr 1fr;gap:2rem;align-items:start}
+@media(max-width:620px){.create-grid{grid-template-columns:1fr}}
+.field-label{font-size:12px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px}
+.field{margin-bottom:1.25rem}
+.text-input{width:100%;font-size:14px;padding:10px 12px;border:0.5px solid var(--border2);border-radius:var(--radius-sm);background:var(--s2);color:var(--text);outline:none;transition:border-color 0.15s;font-family:inherit}
+.text-input:focus{border-color:rgba(255,255,255,0.3)}
+.text-input::placeholder{color:var(--text3)}
+textarea.text-input{resize:vertical;min-height:96px;line-height:1.5}
+.char-count{font-size:11px;color:var(--text3);text-align:right;margin-top:4px}
+.upload-zone{border:1.5px dashed var(--border2);border-radius:var(--radius);padding:2rem 1rem;text-align:center;cursor:pointer;transition:background 0.15s;color:var(--text2);font-size:14px;min-height:160px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+.upload-zone:hover{background:var(--s2)}
+.upload-zone.has-image{padding:0;border-style:solid;min-height:auto;position:relative}
+.upload-zone.has-image img{width:100%;height:200px;object-fit:contain;background:var(--s3);border-radius:calc(var(--radius) - 1px);display:block}
+.recrop-hint{position:absolute;bottom:8px;right:8px;background:rgba(20,16,11,0.8);border-radius:6px;padding:4px 8px;font-size:11px;color:#fff6e3;display:flex;align-items:center;gap:4px}
+
+/* предпросмотр на странице создания — карта в натуральную величину коллекции */
+#preview-card{max-width:230px;margin:0 auto;cursor:default}
+
+/* TIER PICKER (edit) */
+.tier-picker{display:flex;flex-wrap:wrap;gap:8px}
+.tier-opt{padding:7px 14px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid color-mix(in srgb, var(--tc) 35%, transparent);background:transparent;color:var(--tc);opacity:0.55;transition:all 0.15s}
+.tier-opt:hover{opacity:0.85}
+.tier-opt.sel{opacity:1;background:color-mix(in srgb, var(--tc) 16%, transparent);border-color:color-mix(in srgb, var(--tc) 75%, transparent);box-shadow:0 0 14px color-mix(in srgb, var(--tc) 30%, transparent)}
+
+/* BIPOLAR SLIDER (edit) */
+.bp-edit{margin-bottom:18px}
+.bp-edit input[type=range]{width:100%;display:block}
+.bp-edit-poles{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.pole-lbl{font-size:13px;color:var(--text3);transition:color 0.15s}
+.pole-lbl.active{color:var(--text);font-weight:600}
+.pole-val{font-size:12px;font-weight:600;color:var(--text2)}
+
+/* RATING SLIDER (edit) */
+.slider-row{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.slider-name{font-size:13px;color:var(--text);width:120px;flex-shrink:0;display:flex;align-items:center;gap:6px}
+.slider-name i{font-size:14px;color:var(--text2)}
+input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:3px;background:var(--s3);border-radius:2px;outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:15px;height:15px;border-radius:50%;background:var(--text);cursor:pointer;transition:transform 0.1s}
+input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.25)}
+.slider-val{font-size:13px;font-weight:600;width:20px;text-align:right;color:var(--text)}
+
+/* PROFILE PAGE */
+.profile-wrap{max-width:1100px;margin:0 auto;padding:2rem 1.5rem 3rem}
+@media(max-width:420px){.profile-wrap{padding:1.5rem 1rem 3rem}}
+.profile-header{display:flex;align-items:center;gap:1.5rem;margin-bottom:1.5rem;padding-bottom:1.5rem;border-bottom:0.5px solid var(--border)}
+.avatar{width:64px;height:64px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600;color:var(--text2);flex-shrink:0}
+.profile-name{font-size:22px;font-weight:600}
+.profile-stats{font-size:14px;color:var(--text2);margin-top:4px}
+.profile-toolbar{display:flex;justify-content:flex-end;margin-bottom:1.25rem}
+#profile-grid.cards-grid{padding:0}
+
+/* AUTH PAGE */
+.auth-wrap{max-width:360px;margin:0 auto;padding:3.5rem 1.5rem}
+.auth-wrap h2{font-size:22px;font-weight:600;margin-bottom:0.4rem;text-align:center}
+.auth-sub{font-size:13px;color:var(--text2);text-align:center;margin-bottom:1.75rem}
+.auth-field{margin-bottom:1rem}
+.auth-field label{display:block;font-size:12px;color:var(--text2);margin-bottom:6px}
+.auth-toggle{display:block;text-align:center;margin-top:1.25rem;font-size:13px;color:var(--text2);cursor:pointer;background:none;border:none;width:100%}
+.auth-toggle:hover{color:var(--text)}
+
+/* MODALS */
+.modal-overlay{position:fixed;inset:0;background:rgba(43,33,23,0.72);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:1rem;overflow-y:auto}
+.modal{background:var(--s1);border:2px solid var(--ink);border-radius:var(--radius);padding:2rem;max-width:520px;width:100%;margin:auto;box-shadow:5px 6px 0 rgba(43,33,23,0.55)}
+@media(max-width:560px){.modal{padding:1.25rem}}
+.modal h2{font-size:18px;font-weight:600;margin-bottom:6px}
+.modal p{font-size:14px;color:var(--text2);margin-bottom:1.25rem;line-height:1.6}
+.modal code{background:var(--s3);padding:2px 6px;border-radius:4px;font-family:monospace;font-size:13px;color:var(--text)}
+.sql-block{background:var(--s3);border-radius:var(--radius-sm);padding:1rem;font-family:monospace;font-size:12px;color:var(--text2);white-space:pre;overflow-x:auto;margin:1rem 0;line-height:1.6}
+.modal .field{margin-bottom:1rem}
+.modal .field-label{margin-bottom:6px}
+
+/* LASSO MODAL */
+.lasso-wrap{background:var(--s3);border:3px solid var(--ink);border-radius:12px;overflow:hidden;display:flex;justify-content:center;box-shadow:4px 4px 0 rgba(26,20,14,0.35)}
+#lassoCanvas{display:block;max-width:100%;touch-action:none;cursor:crosshair}
+#lasso-apply:disabled{opacity:0.45;cursor:not-allowed}
+
+/* LOADING */
+.spinner{width:24px;height:24px;border:2px solid var(--border);border-top-color:var(--text2);border-radius:50%;animation:spin 0.6s linear infinite;margin:3rem auto}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* TOAST — прячем с запасом на высоту нижней навигации, иначе на мобиле
+   «спрятанный» тост оставался виден над панелью */
+.toast{position:fixed;bottom:calc(1.5rem + var(--bottomnav-h));left:50%;transform:translateX(-50%) translateY(calc(var(--bottomnav-h) + 140px));opacity:0;pointer-events:none;background:#2b2117;color:#fff6e3;border:2px solid #14100b;border-radius:var(--radius-sm);padding:10px 20px;font-size:14px;font-weight:600;z-index:400;transition:transform 0.25s,opacity 0.25s;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis;box-shadow:3px 4px 0 rgba(43,33,23,0.35)}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+
+/* ─── MOBILE READABILITY ──────────────────────────────────── */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+@media(max-width:700px){
+  /* развёрнутый обзор: крупнее подписи и кнопки (карты в ленте и так компактные) */
+  .stat-mini-label{font-size:12px;width:96px;color:var(--text2)}
+  .stat-mini-val{font-size:13px;width:20px}
+  .bar-mini{height:5px}
+  .rt-list{gap:9px}
+  .expand-meta .tier-badge{font-size:13px;padding:5px 13px}
+  .expand-footer .like-btn{font-size:14.5px}
+  .expand-footer .like-btn i{font-size:19px}
+  .delete-btn{font-size:19px}
+  /* expanded card: comfier on a narrow screen */
+  #expand-overlay{padding:2vh 0.6rem calc(1rem + var(--bottomnav-h))}
+  .expand-photo{height:min(38vh,320px)}
+  .expand-body{padding:16px 14px 18px}
+  .expand-name{font-size:21px}
+  .expand-score{font-size:28px}
+  .expand-meta{font-size:14px}
+  .expand-stats{padding:12px 10px}
+  .expand-stats .stat-mini-label{font-size:12.5px;width:108px}
+  .expand-stats .stat-mini-val{font-size:13.5px}
+  .expand-desc-text{font-size:15.5px;line-height:1.7}
+  .expand-desc-label{font-size:12px}
+  /* tierlist: larger tiles and captions */
+  .tl-item{width:84px}
+  .tl-item-photo{width:84px;height:84px}
+  .tl-item-name{font-size:11.5px;color:var(--text)}
+  .tl-item-marks{font-size:11px;padding:2px 7px}
+  .tl-label{font-size:12px}
+  .tl-label small{font-size:10.5px}
+  /* forms */
+  .text-input{font-size:16px} /* stops iOS from auto-zooming inputs */
+  .pole-lbl{font-size:13.5px}
+  .slider-name{font-size:14px}
+  input[type=range]::-webkit-slider-thumb{width:20px;height:20px}
+  .feed-sub{font-size:14.5px}
+}
+</style>
+</head>
+<body>
+
+<!-- ─── NAV ─────────────────────────────── -->
+<nav>
+  <a class="logo" href="#feed" onclick="route('feed');return false">
+    <svg class="logo-bolt" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs><linearGradient id="boltg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#ffd54a"/><stop offset="1" stop-color="#ff8a2a"/>
+      </linearGradient></defs>
+      <path fill="url(#boltg)" d="M13.5 1.5 4 14h5.5L8 22.5 19 9.5h-6l1.5-8z"/>
+    </svg><span class="logo-txt">Скес машина</span>
+  </a>
+  <div class="nav-tabs">
+    <button class="nav-tab" data-tab="feed" onclick="route('feed')"><i class="ti ti-layout-grid"></i> Лента</button>
+    <button class="nav-tab" data-tab="tierlist" onclick="route('tierlist')"><i class="ti ti-list-numbers"></i> Тирлист</button>
+  </div>
+  <div id="nav-actions" style="display:flex;gap:10px;align-items:center"></div>
+</nav>
+
+<!-- ─── BOTTOM NAV (mobile) ───────────────── -->
+<div class="bottom-nav" id="bottom-nav">
+  <button class="bnav-item" data-tab="feed" onclick="route('feed')"><i class="ti ti-layout-grid"></i>Лента</button>
+  <button class="bnav-item" data-tab="tierlist" onclick="route('tierlist')"><i class="ti ti-list-numbers"></i>Тирлист</button>
+  <button class="bnav-item bnav-add" data-tab="create" onclick="route('create')"><i class="ti ti-plus"></i>Обзор</button>
+  <button class="bnav-item" data-tab="profile" id="bnav-profile" onclick="bnavProfile()"><i class="ti ti-user"></i>Профиль</button>
+</div>
+
+<!-- ─── FEED ─────────────────────────────── -->
+<div class="page active" id="page-feed">
+  <div class="feed-header">
+    <div>
+      <div class="feed-title">Лента обзоров</div>
+      <div class="feed-sub" id="feed-count">Загружаем...</div>
+    </div>
+    <div class="seg">
+      <button id="fs-new" class="active" onclick="setFeedSort('new')"><i class="ti ti-clock"></i> Новые</button>
+      <button id="fs-top" onclick="setFeedSort('top')"><i class="ti ti-flame"></i> Топ</button>
+    </div>
+  </div>
+  <div class="cards-grid" id="cards-grid">
+    <div class="spinner"></div>
+  </div>
+</div>
+
+<!-- ─── TIERLIST ──────────────────────────── -->
+<div class="page" id="page-tierlist">
+  <div class="feed-header">
+    <div>
+      <div class="feed-title">Общий тирлист</div>
+      <div class="feed-sub" id="tl-sub">Чем больше лайков от пользователей — тем выше энергетик</div>
+    </div>
+  </div>
+  <div class="tl-wrap" id="tl-container">
+    <div class="spinner"></div>
+  </div>
+</div>
+
+<!-- ─── CREATE ────────────────────────────── -->
+<div class="page" id="page-create">
+  <div class="create-wrap">
+    <div class="create-title" id="create-title">Новый обзор</div>
+    <div class="create-sub" id="create-sub">Загрузи фото, выставь параметры — карточка создастся автоматически</div>
+    <div class="create-grid">
+      <div>
+        <div class="field">
+          <div class="field-label">Фото напитка</div>
+          <div class="upload-zone" id="c-dropzone" onclick="document.getElementById('c-file').click()">
+            <i class="ti ti-upload" style="font-size:26px"></i>
+            <span>Нажмите или перетащите</span>
+          </div>
+          <input type="file" id="c-file" accept="image/*" style="display:none">
+        </div>
+        <div class="field">
+          <div class="field-label">Название напитка</div>
+          <input type="text" class="text-input" id="input-drinkname" placeholder="Например: Monster Ultra" maxlength="60">
+        </div>
+        <div class="field">
+          <div class="field-label">Параметры</div>
+          <div id="sliders-container"></div>
+        </div>
+        <div class="field">
+          <div class="field-label">Редкость — твой вердикт</div>
+          <div class="tier-picker" id="tier-picker"></div>
+        </div>
+        <div class="field">
+          <div class="field-label">Описание / впечатления</div>
+          <textarea class="text-input" id="input-description" maxlength="800" placeholder="Расскажи, каков он на вкус, как зашёл, стоит ли брать..."></textarea>
+          <div class="char-count" id="desc-count">0 / 800</div>
+        </div>
+        <button class="btn btn-primary" style="width:100%;justify-content:center;padding:12px" id="submit-btn" onclick="submitReview()">
+          <i class="ti ti-send"></i> Опубликовать
+        </button>
+      </div>
+
+      <!-- Live preview -->
+      <div>
+        <div class="field-label" style="margin-bottom:10px">Предпросмотр карточки</div>
+        <div class="rcard" id="preview-card" style="position:sticky;top:72px;cursor:default"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── PROFILE ───────────────────────────── -->
+<div class="page" id="page-profile">
+  <div class="profile-wrap">
+    <div class="profile-header">
+      <div class="avatar" id="profile-avatar">?</div>
+      <div>
+        <div class="profile-name" id="profile-username"></div>
+        <div class="profile-stats" id="profile-stats"></div>
+      </div>
+    </div>
+    <div class="profile-toolbar">
+      <div class="seg">
+        <button id="pv-cards" class="active" onclick="setProfileView('cards')"><i class="ti ti-layout-grid"></i> Карточки</button>
+        <button id="pv-tier" onclick="setProfileView('tier')"><i class="ti ti-list-numbers"></i> Тирлист</button>
+      </div>
+    </div>
+    <div class="cards-grid" id="profile-grid"></div>
+    <div id="profile-tierlist" style="display:none"></div>
+  </div>
+</div>
+
+<!-- ─── AUTH ──────────────────────────────── -->
+<div class="page" id="page-auth">
+  <div class="auth-wrap">
+    <h2 id="auth-title">Вход</h2>
+    <div class="auth-sub" id="auth-sub">Войдите, чтобы публиковать обзоры</div>
+    <div class="auth-field">
+      <label>Логин (латиницей)</label>
+      <input type="text" class="text-input" id="auth-username" placeholder="например: skesmachine" autocomplete="username">
+    </div>
+    <div class="auth-field">
+      <label>Пароль</label>
+      <input type="password" class="text-input" id="auth-password" placeholder="минимум 6 символов" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;padding:12px" id="auth-submit" onclick="submitAuth()">Войти</button>
+    <button class="auth-toggle" id="auth-toggle" onclick="toggleAuthMode()">Нет аккаунта? Зарегистрироваться</button>
+  </div>
+</div>
+
+<!-- ─── EXPANDED CARD ─────────────────────── -->
+<div id="expand-overlay">
+  <div class="expand-backdrop" onclick="closeExpand()"></div>
+  <div class="expand-card" id="expand-card"></div>
+</div>
+
+<!-- ─── SETUP MODAL ───────────────────────── -->
+<div class="modal-overlay" id="setup-modal" style="display:none">
+  <div class="modal">
+    <h2>Настройка Supabase</h2>
+    <p>«Скес машина» использует Supabase как базу данных. Это бесплатно. Вот как подключить:</p>
+    <p><strong>1.</strong> Создайте проект на <a href="https://supabase.com" target="_blank" style="color:var(--text)">supabase.com</a></p>
+    <p><strong>2.</strong> В разделе <code>SQL Editor</code> выполните этот скрипт:</p>
+    <div class="sql-block">drop table if exists likes;
+drop table if exists reviews;
+
+create table reviews (
+  id uuid default gen_random_uuid() primary key,
+  created_at timestamptz default now(),
+  user_id uuid references auth.users(id) on delete cascade,
+  username text not null,
+  drink_name text not null,
+  photo_url text,
+  description text,
+  p1 int, p2 int, p3 int, p4 int,
+  tahikardia int, tremor int,
+  score numeric, tier text
+);
+create table likes (
+  review_id uuid references reviews(id) on delete cascade,
+  fingerprint text not null,
+  primary key (review_id, fingerprint)
+);
+alter table reviews enable row level security;
+alter table likes enable row level security;
+create policy "read" on reviews for select using (true);
+create policy "insert own" on reviews for insert with check (auth.uid() = user_id);
+create policy "update own" on reviews for update using (auth.uid() = user_id);
+create policy "delete own" on reviews for delete using (auth.uid() = user_id);
+create policy "read likes" on likes for select using (true);
+create policy "insert likes" on likes for insert with check (true);
+create policy "delete likes" on likes for delete using (true);
+
+create table admins (
+  user_id uuid primary key references auth.users(id) on delete cascade
+);
+alter table admins enable row level security;
+create policy "read admins" on admins for select using (true);
+create policy "admin delete reviews" on reviews for delete
+  using (exists (select 1 from admins where admins.user_id = auth.uid()));
+
+create policy "upload photos" on storage.objects for insert
+  to authenticated with check (bucket_id = 'drink-photos');
+create policy "read photos" on storage.objects for select
+  using (bucket_id = 'drink-photos');</div>
+    <p>Если база уже существует и в ней есть обзоры — <b>не выполняйте</b> скрипт выше, а просто добавьте недостающее:</p>
+    <div class="sql-block">alter table reviews add column if not exists description text;
+create policy "update own" on reviews for update using (auth.uid() = user_id);
+
+create table if not exists admins (
+  user_id uuid primary key references auth.users(id) on delete cascade
+);
+alter table admins enable row level security;
+create policy "read admins" on admins for select using (true);
+create policy "admin delete reviews" on reviews for delete
+  using (exists (select 1 from admins where admins.user_id = auth.uid()));
+-- выдать админку аккаунту (замените логин на свой):
+insert into admins (user_id)
+  select id from auth.users where raw_user_meta_data->>'username' = 'skesmachine'
+  on conflict do nothing;</div>
+    <p><strong>3.</strong> В разделе <code>Storage</code> создайте bucket <code>drink-photos</code> (public).</p>
+    <p><strong>4.</strong> В <code>Authentication → Sign In / Providers → Email</code> выключите <code>Confirm email</code>.</p>
+    <p><strong>5.</strong> Вставьте данные из <code>Settings → API</code>:</p>
+    <div class="field">
+      <div class="field-label">Project URL</div>
+      <input type="text" class="text-input" id="setup-url" placeholder="https://xxxx.supabase.co">
+    </div>
+    <div class="field">
+      <div class="field-label">Anon public key</div>
+      <input type="text" class="text-input" id="setup-key" placeholder="eyJ...">
+    </div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px" onclick="saveSetup()">
+      Сохранить и запустить
+    </button>
+  </div>
+</div>
+
+<!-- ─── LASSO MODAL (вырезание банки по точкам) ─────────────── -->
+<div class="modal-overlay" id="crop-modal" style="display:none">
+  <div class="modal" style="max-width:620px">
+    <h2><i class="ti ti-lasso-polygon"></i> Вырежи банку по точкам</h2>
+    <p style="margin-bottom:0.75rem">Тыкай по контуру банки — точки соединятся в лассо. Минимум 3 точки. Всё за контуром станет прозрачным: ни стола, ни рук, ни фона.</p>
+    <div class="lasso-wrap"><canvas id="lassoCanvas"></canvas></div>
+    <div style="display:flex;gap:10px;margin-top:1rem;flex-wrap:wrap">
+      <button class="btn" style="flex:1;justify-content:center;min-width:130px" onclick="lassoReset()"><i class="ti ti-eraser"></i> Сбросить точки</button>
+      <button class="btn" style="flex:1;justify-content:center;min-width:100px" onclick="cancelCrop()">Отмена</button>
+      <button class="btn btn-primary" style="flex:1.2;justify-content:center;min-width:130px" id="lasso-apply" onclick="applyCrop()"><i class="ti ti-scissors"></i> Применить</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── PARAMETERS ───────────────────────────────────────────────────────
+const BIPOLAR = [
+  { key:'p1', left:'Покурность',     right:'ЗОЖность' },
+  { key:'p2', left:'Рыгучесть',      right:'Дрисливость' },
+  { key:'p3', left:'Благородность',  right:'Бомжовость' },
+  { key:'p4', left:'Депрессивность', right:'Маниакальность' },
+];
+const RATINGS = [
+  { key:'tahikardia', label:'Тахикардия', icon:'ti-heart', color:'#e24b4a' },
+  { key:'tremor',     label:'Тремор',     icon:'ti-activity', color:'#ba7517' },
+];
+const ALL_KEYS = [...BIPOLAR.map(b=>b.key), ...RATINGS.map(r=>r.key)];
+const COL_RIGHT = '#11a36b';
+const COL_LEFT  = '#e2641a';
+const FAKE_DOMAIN = '@skesmachina.app';
+
+// rarity scale from the owner's personal tierlist (index 0 = worst, 6 = best).
+// rarity is chosen by the review author, not computed from parameters.
+const TIERS = [
+  { name:'Ашан энерджи',     color:'#b836b8', bg:'rgba(212,93,212,0.16)' },
+  { name:'Говно без сахара', color:'#5f9e22', bg:'rgba(143,209,79,0.18)' },
+  { name:'Проходняк',        color:'#a08c0a', bg:'rgba(228,204,44,0.20)' },
+  { name:'Заебись на разок', color:'#c2880f', bg:'rgba(255,191,71,0.20)' },
+  { name:'Заебись',          color:'#d2691e', bg:'rgba(255,150,71,0.20)' },
+  { name:'Легенда',          color:'#5050cf', bg:'rgba(127,127,255,0.18)' },
+  { name:'Постоянка',        color:'#d6336c', bg:'rgba(255,99,132,0.16)' },
+];
+const DEFAULT_TIER='Проходняк';
+// reviews saved before this update have the old computed rarity names
+const LEGACY_TIER_MAP={
+  'Легендарный':'Легенда', 'Мифический':'Заебись', 'Эпический':'Заебись на разок',
+  'Редкий':'Проходняк', 'Необычный':'Проходняк', 'Обычный':'Проходняк',
+};
+function tierByName(name){
+  let t=TIERS.find(t=>t.name===name);
+  if(!t && LEGACY_TIER_MAP[name]) t=TIERS.find(x=>x.name===LEGACY_TIER_MAP[name]);
+  return t || TIERS.find(x=>x.name===DEFAULT_TIER);
+}
+function tierIndex(t){ return TIERS.indexOf(t); }
+// 7 авторских вердиктов → 5 букв коллекции (цвет взрыва и вымпела)
+function tierLetterOf(tierName){
+  const i=tierIndex(tierByName(tierName));
+  return i>=5?'S' : i===4?'A' : i===3?'B' : i===2?'C' : 'D';
+}
+const LETTER_COLORS={ S:'#dba008', A:'#e2641a', B:'#d23c3c', C:'#5f9e22', D:'#8a8478' };
+
+// ─── COMIC BURST ──────────────────────────────────────────────────────
+// детерминированный взрыв из 4 форм (звезда / лучи солнца / рваные
+// осколки / облако-бабах) + россыпь искр; сид из id обзора — у каждой
+// карты свой характер взрыва, поворот и искры
+function burstSVG(seedStr, color){
+  let s=0; String(seedStr||'x').split('').forEach(c=>{ s=(s*31+c.charCodeAt(0))>>>0; });
+  const variant=s%4;
+  s=s%233280||7;
+  const rnd=()=>{ s=(s*9301+49297)%233280; return s/233280; };
+  const star=(spikes,R,r,jit)=>{
+    const pts=[];
+    for(let i=0;i<spikes*2;i++){
+      const a=Math.PI*i/spikes-Math.PI/2;
+      const rad=(i%2?r:R)*(1-jit+jit*2*rnd());
+      pts.push((50+Math.cos(a)*rad).toFixed(1)+','+(50+Math.sin(a)*rad).toFixed(1));
+    }
+    return pts.join(' ');
+  };
+  const rot=Math.round(rnd()*360);
+  const SHAPES=[
+    [13,49,23,0.16, 13,44,20,0.16, 13,31,14,0.20],   // классическая звезда
+    [24,49,30,0.12, 24,45,27,0.12, 24,33,20,0.15],   // солнечные лучи
+    [ 9,50,20,0.42,  9,45,18,0.42,  9,30,12,0.40],   // рваные осколки
+    [11,46,36,0.12, 11,42,33,0.12, 11,30,23,0.15],   // облако-бабах
+  ][variant];
+  const layers=
+    `<polygon points="${star(SHAPES[0],SHAPES[1],SHAPES[2],SHAPES[3])}" fill="#2b2117"/>`+
+    `<polygon points="${star(SHAPES[4],SHAPES[5],SHAPES[6],SHAPES[7])}" fill="${color}"/>`+
+    `<polygon points="${star(SHAPES[8],SHAPES[9],SHAPES[10],SHAPES[11])}" fill="rgba(255,255,255,0.3)"/>`;
+  let sparks='';
+  for(let i=0;i<4;i++){
+    const a=rnd()*Math.PI*2, rr=40+rnd()*8;
+    const x=(50+Math.cos(a)*rr).toFixed(1), y=(50+Math.sin(a)*rr).toFixed(1);
+    const sz=(1.6+rnd()*2.2).toFixed(1);
+    sparks+=`<path transform="translate(${x},${y}) scale(${sz})" fill="${i%2?'#2b2117':color}" opacity="0.85" d="M0 -2 L0.6 -0.6 L2 0 L0.6 0.6 L0 2 L-0.6 0.6 L-2 0 L-0.6 -0.6 Z"/>`;
+  }
+  return `<svg class="burst" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><g transform="rotate(${rot} 50 50)">${layers}</g>${sparks}</svg>`;
+}
+// bipolar params: the middle = 0 points, either extreme = 10 points.
+// an all-neutral drink is a plain ordinary energos.
+// ХРАНЕНИЕ: старые обзоры — 0..10 с центром 5 (шаг даёт только чётные баллы);
+// новые — 100+v, где v на шкале 0..20 с центром 10 (любой целый балл 0..10).
+// bpVal приводит оба формата к единой шкале 0..20.
+function bpVal(raw){
+  if(raw==null) return 10;
+  raw=Number(raw);
+  return raw>=100 ? raw-100 : raw*2;
+}
+function bipolarPts(raw){ return Math.abs(bpVal(raw)-10); }
+function calcScore(v){
+  const parts=[
+    ...BIPOLAR.map(b=>bipolarPts(v[b.key])),
+    ...RATINGS.map(r=>Number(v[r.key]||0)),
+  ];
+  return Math.round(parts.reduce((s,x)=>s+x,0)/parts.length*100)/100;
+}
+// дробные значения (средние по нескольким обзорам) показываем с одним знаком
+function fmtPts(x){ return Number.isInteger(x) ? x : (Math.round(x*10)/10).toFixed(1); }
+// always recompute from raw params so old reviews migrate to the new system
+function reviewScore(r){ return calcScore(r); }
+function fmtScore(s){ return Number(s).toFixed(2); }
+function timeAgo(ts){
+  const d=Math.floor((Date.now()-new Date(ts))/1000);
+  if(d<60) return 'только что';
+  if(d<3600) return Math.floor(d/60)+'м назад';
+  if(d<86400) return Math.floor(d/3600)+'ч назад';
+  return Math.floor(d/86400)+'д назад';
+}
+function plural(n, one, few, many){
+  const m10=n%10, m100=n%100;
+  if(m10===1 && m100!==11) return one;
+  if(m10>=2 && m10<=4 && (m100<10||m100>=20)) return few;
+  return many;
+}
+function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function fingerprint(){
+  let fp=localStorage.getItem('canster_fp');
+  if(!fp){ fp=crypto.randomUUID(); localStorage.setItem('canster_fp',fp); }
+  return fp;
+}
+let toastTimer=null;
+function showToast(msg,ms=2600){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastTimer);            // иначе старый таймер гасит новый тост
+  toastTimer=setTimeout(()=>t.classList.remove('show'),ms);
+}
+
+// ─── AUTH STATE ───────────────────────────────────────────────────────
+let currentUser=null;
+let isAdmin=false;          // админ может удалять чужие обзоры (см. таблицу admins)
+async function loadAdminFlag(){
+  isAdmin=false;
+  if(!currentUser || !sb) return;
+  try{
+    const { data }=await sb.from('admins').select('user_id').eq('user_id',currentUser.id);
+    isAdmin=!!(data&&data.length);
+  }catch(e){ /* таблицы admins может не быть — тогда просто без админки */ }
+}
+function currentUsername(){
+  if(!currentUser) return '';
+  return currentUser.user_metadata?.username || (currentUser.email||'').split('@')[0];
+}
+function refreshAuthUI(){
+  const el=document.getElementById('nav-actions');
+  if(currentUser){
+    el.innerHTML=`
+      <button class="btn btn-sm btn-primary hide-mobile" onclick="route('create')"><i class="ti ti-plus" style="font-size:15px"></i> Обзор</button>
+      <button class="btn btn-sm hide-mobile" onclick="goToMyProfile()"><i class="ti ti-user" style="font-size:14px"></i> ${esc(currentUsername())}</button>
+      <button class="btn btn-sm btn-ghost" onclick="logout()" title="Выйти"><i class="ti ti-logout" style="font-size:15px"></i></button>`;
+  } else {
+    el.innerHTML=`
+      <button class="btn btn-sm btn-primary" onclick="route('auth')"><i class="ti ti-login" style="font-size:15px"></i> Войти</button>`;
+  }
+}
+function goToMyProfile(){ const u=currentUsername(); if(u) route('profile',u); }
+function bnavProfile(){
+  if(currentUser) goToMyProfile();
+  else route('auth');
+}
+
+// ─── SUPABASE ─────────────────────────────────────────────────────────
+// ВПИШИТЕ СЮДА ДАННЫЕ СВОЕГО SUPABASE (Settings → API), чтобы сайт сразу
+// работал у всех, кому вы скинете ссылку — без модалки настройки.
+// Anon public key безопасно публиковать: доступ ограничен RLS-политиками.
+const DEFAULT_SUPABASE_URL = 'https://uckwmceuwjzjbawermgd.supabase.co';   // например: 'https://abcd1234.supabase.co'
+const DEFAULT_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVja3dtY2V1d2p6amJhd2VybWdkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzEwMDMsImV4cCI6MjA5NjY0NzAwM30.qUMofMOB_X_m894ss1zkKDpqCI6x73U4cJoYxy_WiHY';   // например: 'eyJhbGciOi...'
+
+let sb=null;
+function initSupabase(){
+  const url=DEFAULT_SUPABASE_URL || localStorage.getItem('canster_url');
+  const key=DEFAULT_SUPABASE_KEY || localStorage.getItem('canster_key');
+  if(url&&key){ sb=supabase.createClient(url,key); return true; }
+  return false;
+}
+function saveSetup(){
+  const url=document.getElementById('setup-url').value.trim();
+  const key=document.getElementById('setup-key').value.trim();
+  if(!url||!key){ showToast('Заполните оба поля'); return; }
+  localStorage.setItem('canster_url',url);
+  localStorage.setItem('canster_key',key);
+  document.getElementById('setup-modal').style.display='none';
+  location.reload();
+}
+
+// ─── ROUTER ───────────────────────────────────────────────────────────
+function setActiveTabs(page){
+  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===page));
+  document.querySelectorAll('.bnav-item').forEach(t=>t.classList.toggle('active', t.dataset.tab===page));
+}
+// программная установка hash вызывает hashchange-эхо, из-за которого страница
+// инициализировалась дважды (например, форма редактирования сбрасывалась).
+// setHash запоминает, что мы поставили сами, а routeFromHash игнорирует эхо.
+let lastHash='';
+function setHash(h){
+  lastHash=h;
+  if(location.hash!=='#'+h) location.hash=h;
+}
+function route(page, param){
+  closeExpand(true);
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById('page-'+page).classList.add('active');
+  window.scrollTo(0,0);
+  setActiveTabs(page);
+  if(page==='feed'){ setHash('feed'); loadFeed(); }
+  if(page==='tierlist'){ setHash('tierlist'); loadTierlist(); }
+  if(page==='create') initCreate();
+  if(page==='profile') loadProfile(param);
+  if(page==='auth') initAuth();
+}
+window.addEventListener('hashchange', routeFromHash);
+function routeFromHash(){
+  const h=location.hash.replace('#','');
+  if(h && h===lastHash) return;   // эхо setHash — страница уже отрисована
+  if(h.startsWith('profile/')) route('profile',decodeURIComponent(h.split('/')[1]));
+  else if(['create','auth','feed','tierlist'].includes(h)) route(h);
+  else route('feed');
+}
+
+// ─── STATS HTML ───────────────────────────────────────────────────────
+// each bipolar param shows its dominant pole and how many points it scored,
+// e.g. "Рыгучесть 5"; a perfectly neutral param shows 0 in grey
+function statsHTML(v){
+  let html='<div class="rt-list">';
+  BIPOLAR.forEach(b=>{
+    const v20=bpVal(v[b.key]);
+    const pts=Math.abs(v20-10);
+    const side=v20>10?1:v20<10?-1:0;
+    const label=side>0?b.right:side<0?b.left:b.left+' / '+b.right;
+    const color=side>0?COL_RIGHT:side<0?COL_LEFT:'var(--text3)';
+    html+=`<div class="stat-mini-row${side===0?' neutral':''}">
+      <span class="stat-mini-label" title="${b.left} / ${b.right}">${label}</span>
+      <div class="bar-mini"><div class="bar-mini-fill" style="width:${pts*10}%;background:${color}"></div></div>
+      <span class="stat-mini-val" style="color:${side===0?'var(--text3)':color}">${fmtPts(pts)}</span>
+    </div>`;
+  });
+  RATINGS.forEach(r=>{
+    const val=Number(v[r.key]||0);
+    html+=`<div class="stat-mini-row">
+      <span class="stat-mini-label">${r.label}</span>
+      <div class="bar-mini"><div class="bar-mini-fill" style="width:${val*10}%;background:${r.color}"></div></div>
+      <span class="stat-mini-val" style="color:${r.color}">${fmtPts(val)}</span>
+    </div>`;
+  });
+  html+='</div>';
+  return html;
+}
+
+// ─── CARD RENDERING ───────────────────────────────────────────────────
+const REVIEW_CACHE={};      // id -> review row (for expand view)
+let LIKED_SET=new Set();    // review ids liked by this fingerprint
+
+// коллекционная карта: банка на комикс-взрыве, минимум текста.
+// характеристики и описание живут в развёрнутом обзоре (клик по карте)
+function cardHTML(d){
+  const tier=tierByName(d.tier);
+  const letter=tierLetterOf(d.tier);
+  const lc=LETTER_COLORS[letter];
+  // вместо фото — статичный 3D-рендер банки (снапшот общего рендерера)
+  const photo = d.photoSrc
+    ? `<span class="snap-wait"></span><img class="can-snap" data-can="${esc(d.photoSrc)}" alt="${esc(d.name)}">`
+    : '<i class="ti ti-can rcard-photo-icon"></i>';
+  const like = d.interactive
+    ? `<button class="like-btn ${d.liked?'liked':''}" data-like="${d.id}" onclick="toggleLike(this,'${d.id}')">
+        <i class="ti ${d.liked?'ti-heart-filled':'ti-heart'}"></i><span data-lc="${d.id}">${d.likeCount||0}</span>
+      </button>`
+    : `<span class="like-btn"><i class="ti ti-heart"></i><span>${d.likeCount||0}</span></span>`;
+  const descIcon = d.hasDesc ? '<i class="ti ti-message-2 has-desc" title="Есть обзор"></i>' : '';
+  const author = d.username
+    ? `<a class="auth" href="#profile/${esc(d.username)}" onclick="event.stopPropagation();route('profile','${esc(d.username)}');return false" title="@${esc(d.username)} · ${d.timeText}">@${esc(d.username)}</a>`
+    : `<span class="auth">${d.timeText}</span>`;
+  // кричащие наклейки поверх банки
+  let sticks='';
+  if(d.isNew) sticks+='<span class="csticker snew">НОВИНКА</span>';
+  if(d.isHot) sticks+='<span class="csticker shot">ОГОНЬ!</span>';
+  if(d.isTrash) sticks+='<span class="csticker strash">ТРЕШ!</span>';
+  else if(letter==='D') sticks+='<span class="csticker sworn">УЦЕНКА</span>';
+  return `
+    <span class="rcard-letter ${letter==='S'?'lS':''}" style="background:${lc}" title="${tier.name}">${letter}</span>
+    ${sticks}
+    <div class="rcard-art">
+      ${burstSVG(d.id||d.name, lc)}
+      ${photo}
+      <div class="rcard-3d"></div>
+    </div>
+    <div class="rcard-info">
+      <div class="rcard-name" title="${esc(d.name)}">${esc(d.name)}</div>
+      <div class="rcard-score"><i class="ti ti-star-filled"></i>${fmtScore(d.score)}<small>/ 10</small></div>
+      <span class="tier-badge" style="background:${tier.bg};color:${tier.color}">${tier.name}</span>
+    </div>
+    <div class="rcard-foot">
+      <span class="ava">${esc((d.username||'?')[0].toUpperCase())}</span>
+      ${author}
+      ${descIcon}
+      ${like}
+    </div>`;
+}
+
+function renderCard(r){
+  REVIEW_CACHE[r.id]=r;
+  const score=reviewScore(r);
+  const letter=tierLetterOf(r.tier);
+  const div=document.createElement('div');
+  div.className='rcard l'+letter+(letter==='S'?' tier-glow':'');
+  div.dataset.id=r.id;
+  div.style.setProperty('--tc',LETTER_COLORS[letter]);
+  // лёгкий случайный наклон (детерминированный по id) — карты как на столе
+  let h=0; String(r.id).split('').forEach(c=>{ h=(h*31+c.charCodeAt(0))>>>0; });
+  div.style.setProperty('--rot',(((h%5)-2)*0.9).toFixed(2)+'deg');
+  div.innerHTML=cardHTML({
+    photoSrc:r.photo_url, name:r.drink_name, username:r.username,
+    timeText:timeAgo(r.created_at), score, tier:r.tier,
+    likeCount:r.like_count, liked:LIKED_SET.has(r.id),
+    hasDesc: !!(r.description&&r.description.trim()),
+    isNew: Date.now()-new Date(r.created_at).getTime() < 48*3600e3,
+    isHot: (r.like_count||0)>=3,
+    isTrash: score<3,
+    id:r.id, interactive:true
+  });
+  div.onclick=e=>{
+    if(e.target.closest('button,a')) return;
+    openExpand(r.id, div);
+  };
+  bindTilt(div);
+  bindHover3D(div, r.photo_url);
+  return div;
+}
+
+// на наведении банка «оживает»: монтируем настоящую 3D-сцену поверх фото.
+// одновременно живёт максимум одна (WebGL-контексты ограничены), клики
+// проходят сквозь канвас (pointer-events:none) — карта остаётся кликабельной
+let hover3DTimer=null, hover3DStage=null;
+function bindHover3D(card, photoUrl){
+  if(!photoUrl) return;
+  if(window.matchMedia('(hover: none)').matches) return;
+  const stage=card.querySelector('.rcard-3d');
+  card.addEventListener('mouseenter',()=>{
+    clearTimeout(hover3DTimer);
+    hover3DTimer=setTimeout(()=>{
+      if(hover3DStage && hover3DStage!==stage){ // гасим предыдущую банку
+        hover3DStage.classList.remove('active');
+        if(window.unmountCan3D) unmountCan3D(hover3DStage);
+      }
+      hover3DStage=stage;
+      stage.classList.add('active');
+      const img=new Image(); img.crossOrigin='anonymous';
+      img.onload=()=>{ if(stage.classList.contains('active') && !stage.__can3d && window.mountCan3D) mountCan3D(stage,img); };
+      img.src=photoUrl;
+    },180);  // защита от пролёта курсором по ленте
+  });
+  card.addEventListener('mouseleave',()=>{
+    clearTimeout(hover3DTimer);
+    stage.classList.remove('active');
+    if(window.unmountCan3D) unmountCan3D(stage);
+    if(hover3DStage===stage) hover3DStage=null;
+  });
+}
+
+// превращает <img class="can-snap" data-can> в снапшот 3D-банки.
+// модуль Three.js может ещё грузиться — тогда повторяем чуть позже
+function hydrateCanSnaps(root){
+  const imgs=(root||document).querySelectorAll('img.can-snap:not(.ready)');
+  if(!imgs.length) return;
+  if(!window.canSnapshot){ setTimeout(()=>hydrateCanSnaps(root),300); return; }
+  imgs.forEach(im=>{
+    if(im.__snapping) return;
+    im.__snapping=true;
+    canSnapshot(im.dataset.can).then(u=>{
+      im.src=u||im.dataset.can;          // рендер не вышел — показываем фото
+      im.classList.add('ready');
+      const w=im.parentElement&&im.parentElement.querySelector('.snap-wait');
+      if(w) w.remove();
+    });
+  });
+}
+
+// 3D tilt that follows the cursor — the Hearthstone gallery feel.
+// skipped on touch devices, where there is no hover.
+function bindTilt(card){
+  if(window.matchMedia('(hover: none)').matches) return;
+  card.addEventListener('mousemove',e=>{
+    const r=card.getBoundingClientRect();
+    const px=(e.clientX-r.left)/r.width-0.5;
+    const py=(e.clientY-r.top)/r.height-0.5;
+    card.style.transform=`perspective(900px) rotateX(${(-py*7).toFixed(2)}deg) rotateY(${(px*9).toFixed(2)}deg) translateY(-4px) scale(1.015)`;
+  });
+  card.addEventListener('mouseleave',()=>{ card.style.transform=''; });
+}
+
+// ─── EXPANDED CARD (Hearthstone-style zoom) ───────────────────────────
+let expandSourceEl=null;
+
+function expandHTML(r){
+  const score=reviewScore(r);
+  const tier=tierByName(r.tier);
+  const photo=r.photo_url
+    ? `<img src="${esc(r.photo_url)}" alt="${esc(r.drink_name)}">`
+    : '<i class="ti ti-can rcard-photo-icon"></i>';
+  const desc=(r.description||'').trim();
+  const descBlock=desc
+    ? `<div class="expand-desc-text">${esc(desc)}</div>`
+    : `<div class="expand-desc-text muted">Автор не оставил описание — видимо, дегустация прошла без последствий.</div>`;
+  const letter=tierLetterOf(r.tier);
+  const can3dBtn=r.photo_url
+    ? `<button class="can3d-btn" data-img="${esc(r.photo_url)}" onclick="toggleCan3D(this)" title="Покрутить банку в 3D"><i class="ti ti-rotate-3d"></i> 3D</button>
+       <div class="can3d-stage" id="can3d-stage" data-dist="4.15"></div>`
+    : '';
+  return `
+    <div class="expand-photo">
+      <button class="expand-close" onclick="closeExpand()" title="Закрыть"><i class="ti ti-x"></i></button>
+      <div class="expand-frame"></div>
+      ${burstSVG(r.id, LETTER_COLORS[letter])}
+      ${photo}
+      ${can3dBtn}
+      <span class="rarity-gem expand-gem" title="${tier.name}"></span>
+      <div class="expand-tierbar"></div>
+    </div>
+    <div class="expand-body">
+      <div class="expand-headrow expand-reveal" style="animation-delay:0.05s">
+        <div>
+          <div class="expand-name">${esc(r.drink_name)}</div>
+        </div>
+        <div class="expand-score">${fmtScore(score)} <small>/ 10</small></div>
+      </div>
+      <div class="expand-meta expand-reveal" style="animation-delay:0.1s">
+        <span class="tier-badge" style="background:${tier.bg};color:${tier.color}">${tier.name}</span>
+        <a href="#profile/${esc(r.username)}" onclick="route('profile','${esc(r.username)}');return false">@${esc(r.username)}</a>
+        · <span>${timeAgo(r.created_at)}</span>
+      </div>
+      <div class="expand-stats expand-reveal" style="animation-delay:0.18s">${statsHTML(r)}</div>
+      <div class="expand-desc expand-reveal" style="animation-delay:0.28s">
+        <div class="expand-desc-label"><i class="ti ti-message-2"></i> Описание от @${esc(r.username)}</div>
+        ${descBlock}
+      </div>
+      <div class="expand-footer expand-reveal" style="animation-delay:0.36s">
+        <button class="like-btn ${LIKED_SET.has(r.id)?'liked':''}" data-like="${r.id}" onclick="toggleLike(this,'${r.id}')">
+          <i class="ti ${LIKED_SET.has(r.id)?'ti-heart-filled':'ti-heart'}"></i>
+          <span data-lc="${r.id}">${r.like_count||0}</span>
+        </button>
+        ${currentUser&&r.user_id===currentUser.id?`<button class="edit-btn" title="Редактировать" onclick="startEdit('${r.id}')"><i class="ti ti-pencil"></i></button>`:''}
+        ${currentUser&&(r.user_id===currentUser.id||isAdmin)?`<button class="delete-btn" ${currentUser&&r.user_id===currentUser.id?'':'style="margin-left:auto"'} title="Удалить" onclick="deleteReview('${r.id}')"><i class="ti ti-trash"></i></button>`:''}
+      </div>
+    </div>`;
+}
+
+function openExpand(id, sourceEl){
+  const r=REVIEW_CACHE[id];
+  if(!r) return;
+  showExpandCard(expandHTML(r), tierByName(r.tier).color, sourceEl);
+}
+
+// общий показ оверлея: и для обзора, и для сводной карточки энергетика
+function showExpandCard(html, tierColor, sourceEl){
+  const ov=document.getElementById('expand-overlay');
+  const card=document.getElementById('expand-card');
+  const stage=document.getElementById('can3d-stage');
+  if(stage && window.unmountCan3D) unmountCan3D(stage);  // переключение карточек внутри оверлея
+  expandSourceEl=sourceEl||null;
+
+  card.style.setProperty('--tc',tierColor);
+  card.innerHTML=html;
+  ov.style.display='flex';
+  // банка сразу в 3D: кнопкой «фото» можно вернуть плоский снимок.
+  // setTimeout вместо rAF — rAF в фоновой вкладке может не выстрелить вовсе
+  const auto3d=card.querySelector('.can3d-btn');
+  if(auto3d) setTimeout(()=>{ if(!auto3d.classList.contains('active')) toggleCan3D(auto3d); },30);
+  document.body.style.overflow='hidden';
+
+  // FLIP: animate from the source card position to the centered layout
+  if(sourceEl){
+    const from=sourceEl.getBoundingClientRect();
+    const to=card.getBoundingClientRect();
+    const dx=from.left-to.left, dy=from.top-to.top;
+    const sx=from.width/to.width, sy=from.height/to.height;
+    card.style.transition='none';
+    card.style.transformOrigin='top left';
+    card.style.transform=`translate(${dx}px,${dy}px) scale(${sx},${sy})`;
+    card.style.opacity='0.85';
+    requestAnimationFrame(()=>{ requestAnimationFrame(()=>{
+      card.style.transition='transform 0.5s cubic-bezier(.2,.85,.25,1), opacity 0.4s';
+      card.style.transform='none';
+      card.style.opacity='1';
+    }); });
+  } else {
+    card.style.transition='none';
+    card.style.transform='scale(0.92)';
+    card.style.opacity='0';
+    requestAnimationFrame(()=>{ requestAnimationFrame(()=>{
+      card.style.transition='transform 0.4s cubic-bezier(.2,.85,.25,1), opacity 0.35s';
+      card.style.transform='none';
+      card.style.opacity='1';
+    }); });
+  }
+  requestAnimationFrame(()=>ov.classList.add('open'));
+}
+
+// перекинуть фото ↔ 3D-банка прямо в окне развёрнутой карточки
+function toggleCan3D(btn){
+  const stage=document.getElementById('can3d-stage');
+  if(!stage) return;
+  const on=stage.classList.contains('active');
+  if(on){
+    if(window.unmountCan3D) unmountCan3D(stage);
+    stage.classList.remove('active','loading','failed');
+    btn.classList.remove('active');
+    btn.innerHTML='<i class="ti ti-rotate-3d"></i> 3D';
+    return;
+  }
+  if(!window.__can3dReady || !window.mountCan3D){
+    btn.innerHTML='<i class="ti ti-loader-2"></i> загрузка…';
+    setTimeout(()=>toggleCan3D(btn),350); return;   // ждём загрузки Three.js
+  }
+  stage.classList.add('active','loading');
+  btn.classList.add('active');
+  btn.innerHTML='<i class="ti ti-photo"></i> оригинал';
+  // сначала грузим фото, потом собираем банку синхронно (так меши рендерятся)
+  const img=new Image(); img.crossOrigin='anonymous';
+  img.onload=()=>{ if(stage.classList.contains('active') && !stage.__can3d) mountCan3D(stage,img); };
+  img.onerror=()=>{ stage.classList.remove('loading'); stage.classList.add('failed'); };
+  img.src=btn.dataset.img;
+}
+
+function closeExpand(instant){
+  const ov=document.getElementById('expand-overlay');
+  if(ov.style.display!=='flex') return;
+  const stage=document.getElementById('can3d-stage');
+  if(stage && window.unmountCan3D) unmountCan3D(stage);
+  const card=document.getElementById('expand-card');
+  document.body.style.overflow='';
+  ov.classList.remove('open');
+  if(instant){
+    ov.style.display='none';
+    card.innerHTML='';
+    expandSourceEl=null;
+    return;
+  }
+  // animate back to the source card if it's still on screen
+  let done=false;
+  const finish=()=>{
+    if(done) return; done=true;
+    ov.style.display='none';
+    card.innerHTML='';
+    card.style.transform='';
+    card.style.opacity='';
+    expandSourceEl=null;
+  };
+  if(expandSourceEl && document.body.contains(expandSourceEl)){
+    const from=card.getBoundingClientRect();
+    const to=expandSourceEl.getBoundingClientRect();
+    const dx=to.left-from.left, dy=to.top-from.top;
+    const sx=to.width/from.width, sy=to.height/from.height;
+    card.style.transition='transform 0.38s cubic-bezier(.4,.1,.6,1), opacity 0.32s';
+    card.style.transformOrigin='top left';
+    card.style.transform=`translate(${dx}px,${dy}px) scale(${sx},${sy})`;
+    card.style.opacity='0';
+  } else {
+    card.style.transition='transform 0.3s, opacity 0.3s';
+    card.style.transform='scale(0.92)';
+    card.style.opacity='0';
+  }
+  setTimeout(finish,400);
+}
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeExpand(); });
+
+// ─── FEED ─────────────────────────────────────────────────────────────
+let feedSort='new', feedReviews=[];
+
+function setFeedSort(s){
+  feedSort=s;
+  document.getElementById('fs-new').classList.toggle('active',s==='new');
+  document.getElementById('fs-top').classList.toggle('active',s==='top');
+  renderFeed();
+}
+
+function renderFeed(){
+  const grid=document.getElementById('cards-grid');
+  grid.innerHTML='';
+  const list=feedReviews.slice();
+  if(feedSort==='top') list.sort((a,b)=>(b.like_count-a.like_count)||(reviewScore(b)-reviewScore(a)));
+  // раздача из бустера: карты влетают по очереди
+  list.forEach((r,i)=>{
+    const el=renderCard(r);
+    el.classList.add('deal');
+    el.style.animationDelay=Math.min(i*60,900)+'ms';
+    grid.appendChild(el);
+  });
+  hydrateCanSnaps(grid);
+}
+
+async function loadFeed(){
+  const grid=document.getElementById('cards-grid');
+  grid.innerHTML='<div class="spinner"></div>';
+
+  const { data:reviews, error } = await sb.from('reviews')
+    .select('*').order('created_at',{ascending:false}).limit(50);
+  if(error){ grid.innerHTML=`<div style="grid-column:1/-1;padding:1.5rem;background:var(--s2);border-radius:var(--radius);font-size:13px;color:var(--text2)"><b style="color:var(--text)">Ошибка:</b> ${esc(error.message)}<br><br>Скорее всего таблицы ещё не созданы — выполните SQL-скрипт в Supabase SQL Editor.</div>`; return; }
+
+  LIKED_SET=await getLikedSet();
+  const countMap=await getLikeCounts();
+
+  if(!reviews.length){
+    grid.innerHTML='<div class="empty-state" style="grid-column:1/-1"><i class="ti ti-coffee"></i><p>Обзоров пока нет. Будьте первым!</p></div>';
+    document.getElementById('feed-count').textContent='0 обзоров';
+    return;
+  }
+  document.getElementById('feed-count').textContent=reviews.length+' '+plural(reviews.length,'обзор','обзора','обзоров');
+  reviews.forEach(r=>{ r.like_count=countMap[r.id]||0; });
+  feedReviews=reviews;
+  renderFeed();
+}
+
+async function getLikedSet(){
+  const fp=fingerprint();
+  const { data } = await sb.from('likes').select('review_id').eq('fingerprint',fp);
+  return new Set((data||[]).map(l=>l.review_id));
+}
+async function getLikeCounts(){
+  const { data } = await sb.from('likes').select('review_id');
+  const m={}; (data||[]).forEach(l=>{ m[l.review_id]=(m[l.review_id]||0)+1; }); return m;
+}
+
+// ─── GLOBAL TIERLIST ──────────────────────────────────────────────────
+// letter rows S–D; drinks ranked purely by likes across all their reviews.
+// drinks nobody liked yet are not ranked — they enter with their first like.
+const TL_ROWS=[
+  { name:'S', color:'#dba008', bg:'rgba(255,205,60,0.22)' },
+  { name:'A', color:'#e2641a', bg:'rgba(255,150,71,0.20)' },
+  { name:'B', color:'#d23c3c', bg:'rgba(255,99,99,0.16)' },
+  { name:'C', color:'#5f9e22', bg:'rgba(143,209,79,0.18)' },
+  { name:'D', color:'#8a8478', bg:'rgba(138,132,120,0.18)' },
+];
+
+// ─── DRINK NAME RECOGNITION ───────────────────────────────────────────
+// «Monster Ultra», «монстер ультра» и «MONSTER  ULTRA!» — один напиток:
+// транслитерация кириллицы + чистка символов + допуск на 1-2 опечатки.
+const RU2LAT={'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'e','ж':'zh','з':'z','и':'i','й':'i','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u','ф':'f','х':'h','ц':'ts','ч':'ch','ш':'sh','щ':'sch','ъ':'','ы':'y','ь':'','э':'e','ю':'yu','я':'ya'};
+const DRINK_ALIASES={'bern':'burn','monstr':'monster','redbul':'red bull','energi':'energy'};
+function normDrink(name){
+  let s=(name||'').toLowerCase().trim();
+  s=s.split('').map(c=>RU2LAT[c]!==undefined?RU2LAT[c]:c).join('');
+  s=s.replace(/[^a-z0-9 ]+/g,' ').replace(/\s+/g,' ').trim();
+  s=s.split(' ').map(w=>DRINK_ALIASES[w]||w).join(' ');
+  return s;
+}
+function levenshtein(a,b){
+  if(a===b) return 0;
+  const m=a.length, n=b.length;
+  if(!m) return n; if(!n) return m;
+  let prev=Array.from({length:n+1},(_,j)=>j);
+  for(let i=1;i<=m;i++){
+    const cur=[i];
+    for(let j=1;j<=n;j++){
+      cur[j]=Math.min(prev[j]+1, cur[j-1]+1, prev[j-1]+(a[i-1]===b[j-1]?0:1));
+    }
+    prev=cur;
+  }
+  return prev[n];
+}
+function sameDrink(a,b){
+  if(a===b) return true;
+  if(a.replace(/ /g,'')===b.replace(/ /g,'')) return true; // «redbull» = «red bull»
+  const L=Math.max(a.length,b.length);
+  if(L<6) return false;            // короткие имена не сближаем: volt ≠ bolt
+  const tol=L<10?1:2;              // допуск на опечатки по длине названия
+  if(Math.abs(a.length-b.length)>tol) return false;
+  return levenshtein(a,b)<=tol;
+}
+
+async function loadTierlist(){
+  const box=document.getElementById('tl-container');
+  box.innerHTML='<div class="spinner"></div>';
+
+  const { data:reviews, error } = await sb.from('reviews').select('*').limit(1000);
+  if(error){ box.innerHTML=`<div class="empty-state"><i class="ti ti-alert-triangle"></i><p>Ошибка: ${esc(error.message)}</p></div>`; return; }
+  if(!reviews||!reviews.length){
+    box.innerHTML='<div class="empty-state"><i class="ti ti-list-numbers"></i><p>В базе пока нет ни одного энергетика</p></div>';
+    document.getElementById('tl-sub').textContent='Чем больше лайков от пользователей — тем выше энергетик';
+    return;
+  }
+  LIKED_SET=await getLikedSet();
+  // лайки берём с отпечатками: для рейтинга напитка человек считается один раз,
+  // даже если лайкнул несколько обзоров одного и того же энергетика
+  const { data:likeRows } = await sb.from('likes').select('review_id,fingerprint');
+  const countMap={}, fpMap={};
+  (likeRows||[]).forEach(l=>{
+    countMap[l.review_id]=(countMap[l.review_id]||0)+1;
+    (fpMap[l.review_id]=fpMap[l.review_id]||[]).push(l.fingerprint);
+  });
+
+  // merge reviews of the same drink: fuzzy match on the normalized name,
+  // likes and scores from every user are combined into one entry
+  const groups=[];
+  reviews.forEach(r=>{
+    r.like_count=countMap[r.id]||0;
+    REVIEW_CACHE[r.id]=r;
+    const key=normDrink(r.drink_name);
+    if(!key) return;
+    let g=groups.find(g=>sameDrink(g.key,key));
+    if(!g){ g={ key, reviews:[], likers:new Set(), scoreSum:0 }; groups.push(g); }
+    g.reviews.push(r);
+    (fpMap[r.id]||[]).forEach(fp=>g.likers.add(fp));
+    g.scoreSum += reviewScore(r);
+    if(!g.photo && r.photo_url) g.photo=r.photo_url;
+  });
+  groups.forEach(g=>{ g.marks=g.likers.size; });
+  const list=groups.filter(d=>d.marks>0);   // в рейтинг попадают только лайкнутые
+  const waiting=groups.length-list.length;
+
+  if(!list.length){
+    box.innerHTML='<div class="empty-state"><i class="ti ti-heart"></i><p>Пока ни у одного энергетика нет лайков.<br>Полайкайте обзоры в ленте — и тирлист оживёт!</p></div>';
+    document.getElementById('tl-sub').textContent=
+      waiting?`${waiting} ${plural(waiting,'энергетик ждёт','энергетика ждут','энергетиков ждут')} первого лайка`:
+      'Чем больше лайков от пользователей — тем выше энергетик';
+    return;
+  }
+
+  list.forEach(d=>{
+    d.avg=d.scoreSum/d.reviews.length;
+    // best review of the drink opens on click; its spelling names the entry
+    d.topReview=d.reviews.slice().sort((a,b)=>(b.like_count-a.like_count)||(reviewScore(b)-reviewScore(a)))[0];
+    d.name=d.topReview.drink_name.trim();
+    if(!d.photo) d.photo=d.topReview.photo_url;
+  });
+  list.sort((a,b)=>(b.marks-a.marks)||(b.avg-a.avg));
+
+  // percentile → letter row (0=S … 4=D); equal likes land in the same row
+  const n=list.length;
+  const fracToRow=f=> f<=0.1?0 : f<=0.3?1 : f<=0.55?2 : f<=0.8?3 : 4;
+  const marksRow={};
+  const rows={0:[],1:[],2:[],3:[],4:[]};
+  list.forEach((d,i)=>{
+    let t;
+    if(marksRow[d.marks]!==undefined) t=marksRow[d.marks];
+    else { t = n===1 ? 0 : fracToRow(i/(n-1)); marksRow[d.marks]=t; }
+    rows[t].push(d);
+  });
+
+  const totalMarks=list.reduce((s,d)=>s+d.marks,0);
+  const totalReviews=list.reduce((s,d)=>s+d.reviews.length,0);
+  document.getElementById('tl-sub').textContent=
+    `${n} ${plural(n,'энергетик','энергетика','энергетиков')} в рейтинге (${totalReviews} ${plural(totalReviews,'обзор','обзора','обзоров')}) · ${totalMarks} ${plural(totalMarks,'лайк','лайка','лайков')} (один человек = один лайк за напиток)`+
+    (waiting?` · ещё ${waiting} ${plural(waiting,'ждёт','ждут','ждут')} первого лайка`:'');
+
+  TL_GROUPS={};
+  list.forEach(d=>{ TL_GROUPS[d.key]=d; });
+
+  box.innerHTML=TL_ROWS.map((row,t)=>{
+    const items=rows[t];
+    const itemsHTML=items.length
+      ? items.map(d=>`
+        <div class="tl-item" style="--tc:${row.color}" onclick="openDrinkExpand('${d.key}',this)" title="${esc(d.name)} — ${d.marks} ${plural(d.marks,'лайк','лайка','лайков')}, ${d.reviews.length} ${plural(d.reviews.length,'обзор','обзора','обзоров')}, средний балл ${d.avg.toFixed(2)}">
+          <div class="tl-item-photo">
+            ${d.photo?`<img src="${esc(d.photo)}" alt="${esc(d.name)}" loading="lazy">`:'<i class="ti ti-can"></i>'}
+            <span class="tl-item-marks"><i class="ti ti-heart-filled"></i>${d.marks}</span>
+            ${d.reviews.length>1?`<span class="tl-item-score">${d.avg.toFixed(1)} · ${d.reviews.length} обз.</span>`:''}
+          </div>
+          <div class="tl-item-name">${esc(d.name)}</div>
+        </div>`).join('')
+      : '<span class="tl-empty">Пока пусто</span>';
+    return `<div class="tl-row" style="border-color:color-mix(in srgb, ${row.color} 45%, #2b2117)">
+      <div class="tl-label tl-letter" style="background:${row.bg};color:${row.color}">${row.name}<small>${items.length} шт.</small></div>
+      <div class="tl-items">${itemsHTML}</div>
+    </div>`;
+  }).join('');
+}
+
+// ─── DRINK AGGREGATE VIEW ─────────────────────────────────────────────
+// сводная карточка энергетика: усреднённые параметры по всем обзорам,
+// уникальные лайки и список самих обзоров (кликом открывается каждый)
+let TL_GROUPS={};
+
+function openDrinkExpand(key, sourceEl){
+  const g=TL_GROUPS[key];
+  if(!g) return;
+  const n=g.reviews.length;
+
+  // средние значения параметров: биполярные усредняем на шкале 0..20
+  const v={};
+  BIPOLAR.forEach(b=>{ v[b.key]=100 + g.reviews.reduce((s,r)=>s+bpVal(r[b.key]),0)/n; });
+  RATINGS.forEach(rt=>{ v[rt.key]=g.reviews.reduce((s,r)=>s+Number(r[rt.key]||0),0)/n; });
+
+  // тир — самый частый вердикт авторов; при равенстве берём более высокий
+  const cnt={};
+  g.reviews.forEach(r=>{ const t=tierByName(r.tier).name; cnt[t]=(cnt[t]||0)+1; });
+  let tier=TIERS[0];
+  TIERS.forEach(t=>{ if((cnt[t.name]||0)>=(cnt[tier.name]||0) && cnt[t.name]) tier=t; });
+
+  const photo=g.photo
+    ? `<img src="${esc(g.photo)}" alt="${esc(g.name)}">`
+    : '<i class="ti ti-can rcard-photo-icon"></i>';
+  const gLetter=tierLetterOf(tier.name);
+  const can3dBtn=g.photo
+    ? `<button class="can3d-btn" data-img="${esc(g.photo)}" onclick="toggleCan3D(this)" title="Покрутить банку в 3D"><i class="ti ti-rotate-3d"></i> 3D</button>
+       <div class="can3d-stage" id="can3d-stage" data-dist="4.15"></div>`
+    : '';
+  const sorted=g.reviews.slice().sort((a,b)=>(b.like_count-a.like_count)||(reviewScore(b)-reviewScore(a)));
+  const revList=sorted.map(r=>{
+    const rt=tierByName(r.tier);
+    return `<div class="drev" onclick="openExpand('${r.id}')">
+      <div class="drev-ava">${esc((r.username||'?')[0].toUpperCase())}</div>
+      <div class="drev-info">
+        <div class="drev-user">@${esc(r.username)}</div>
+        <div class="drev-meta"><span style="color:${rt.color};font-weight:600">${rt.name}</span> · ${timeAgo(r.created_at)}</div>
+      </div>
+      <div class="drev-right">
+        <div class="drev-score">${fmtScore(reviewScore(r))}</div>
+        <div class="drev-likes"><i class="ti ti-heart-filled"></i>${r.like_count||0}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const html=`
+    <div class="expand-photo">
+      <button class="expand-close" onclick="closeExpand()" title="Закрыть"><i class="ti ti-x"></i></button>
+      <div class="expand-frame"></div>
+      ${burstSVG(g.key, LETTER_COLORS[gLetter])}
+      ${photo}
+      ${can3dBtn}
+      <span class="rarity-gem expand-gem" title="${tier.name}"></span>
+      <div class="expand-tierbar"></div>
+    </div>
+    <div class="expand-body">
+      <div class="expand-headrow expand-reveal" style="animation-delay:0.05s">
+        <div><div class="expand-name">${esc(g.name)}</div></div>
+        <div class="expand-score">${fmtScore(g.avg)} <small>/ 10</small></div>
+      </div>
+      <div class="expand-meta expand-reveal" style="animation-delay:0.1s">
+        <span class="tier-badge" style="background:${tier.bg};color:${tier.color}">${tier.name}</span>
+        <span><i class="ti ti-heart-filled" style="color:#d6336c"></i> ${g.marks} ${plural(g.marks,'лайк','лайка','лайков')}</span>
+        · <span>${n} ${plural(n,'обзор','обзора','обзоров')}</span>
+      </div>
+      <div class="expand-stats expand-reveal" style="animation-delay:0.18s">${statsHTML(v)}</div>
+      <div class="drev-list expand-reveal" style="animation-delay:0.28s">
+        <div class="expand-desc-label"><i class="ti ti-messages"></i> ${n>1?'Средние оценки по '+n+' обзорам — вот они все:':'Единственный обзор:'}</div>
+        ${revList}
+      </div>
+    </div>`;
+  showExpandCard(html, tier.color, sourceEl);
+}
+
+// ─── LIKES ────────────────────────────────────────────────────────────
+async function toggleLike(btn, id){
+  const fp=fingerprint();
+  const liked=btn.classList.contains('liked');
+  // sync every instance of this review's like button/counter (feed + expanded)
+  document.querySelectorAll(`[data-like="${id}"]`).forEach(b=>{
+    b.classList.toggle('liked',!liked);
+    const i=b.querySelector('i');
+    if(i) i.className='ti '+(!liked?'ti-heart-filled':'ti-heart');
+  });
+  document.querySelectorAll(`[data-lc="${id}"]`).forEach(el=>{
+    el.textContent=Math.max(0,(parseInt(el.textContent)||0)+(liked?-1:1));
+  });
+  if(REVIEW_CACHE[id]) REVIEW_CACHE[id].like_count=Math.max(0,(REVIEW_CACHE[id].like_count||0)+(liked?-1:1));
+  if(liked){
+    LIKED_SET.delete(id);
+    await sb.from('likes').delete().eq('review_id',id).eq('fingerprint',fp);
+  } else {
+    LIKED_SET.add(id);
+    await sb.from('likes').insert({review_id:id, fingerprint:fp});
+  }
+}
+
+// ─── DELETE ───────────────────────────────────────────────────────────
+async function deleteReview(id){
+  if(!confirm('Удалить этот обзор? Действие необратимо.')) return;
+  // .select() возвращает реально удалённые строки: без него RLS молча
+  // «удаляет» 0 строк и мы бы соврали, что обзор удалён
+  const { data, error } = await sb.from('reviews').delete().eq('id',id).select();
+  if(error){ showToast('Ошибка удаления: '+error.message); return; }
+  if(!data||!data.length){ showToast('Не удалилось: в базе нет права на удаление этого обзора (нужна админ-политика в Supabase)', 6000); return; }
+  showToast('Обзор удалён');
+  closeExpand(true);
+  const card=document.querySelector('.rcard[data-id="'+id+'"]');
+  if(card) card.remove();
+  delete REVIEW_CACHE[id];
+}
+
+// ─── PROFILE ──────────────────────────────────────────────────────────
+let profileView='cards';
+let profileReviews=[];
+
+function setProfileView(v){
+  profileView=v;
+  document.getElementById('pv-cards').classList.toggle('active',v==='cards');
+  document.getElementById('pv-tier').classList.toggle('active',v==='tier');
+  document.getElementById('profile-grid').style.display=v==='cards'?'grid':'none';
+  document.getElementById('profile-tierlist').style.display=v==='tier'?'block':'none';
+  if(v==='tier') renderProfileTierlist();
+}
+
+async function loadProfile(username){
+  setHash('profile/'+encodeURIComponent(username));
+  document.getElementById('profile-username').textContent='@'+username;
+  document.getElementById('profile-avatar').textContent=(username[0]||'?').toUpperCase();
+  document.getElementById('profile-stats').textContent='Загружаем...';
+  const grid=document.getElementById('profile-grid');
+  grid.innerHTML='<div class="spinner"></div>';
+
+  const { data:reviews } = await sb.from('reviews').select('*')
+    .eq('username',username).order('created_at',{ascending:false});
+  LIKED_SET=await getLikedSet();
+  const countMap=await getLikeCounts();
+
+  profileReviews=reviews||[];
+  profileReviews.forEach(r=>{ r.like_count=countMap[r.id]||0; REVIEW_CACHE[r.id]=r; });
+
+  const total=profileReviews.length;
+  const avg=total?(profileReviews.reduce((s,r)=>s+reviewScore(r),0)/total).toFixed(2):'0.00';
+  document.getElementById('profile-stats').textContent=
+    `${total} ${plural(total,'обзор','обзора','обзоров')} · средний балл ${avg}`;
+
+  grid.innerHTML='';
+  if(!total){
+    grid.innerHTML='<div class="empty-state" style="grid-column:1/-1"><i class="ti ti-mood-empty"></i><p>Нет обзоров</p></div>';
+    document.getElementById('profile-tierlist').innerHTML='<div class="empty-state"><i class="ti ti-mood-empty"></i><p>Нет обзоров</p></div>';
+    setProfileView(profileView);
+    return;
+  }
+  profileReviews.forEach((r,i)=>{
+    const el=renderCard(r);
+    el.classList.add('deal');
+    el.style.animationDelay=Math.min(i*60,900)+'ms';
+    grid.appendChild(el);
+  });
+  hydrateCanSnaps(grid);
+  setProfileView(profileView);
+}
+
+// personal tierlist: rows follow the rarity the author picked for each drink,
+// laid out like the owner's reference tierlist
+function renderProfileTierlist(){
+  const box=document.getElementById('profile-tierlist');
+  if(!profileReviews.length) return;
+  const rows={6:[],5:[],4:[],3:[],2:[],1:[],0:[]};
+  profileReviews.forEach(r=>{
+    rows[tierIndex(tierByName(r.tier))].push(r);
+  });
+  Object.values(rows).forEach(arr=>arr.sort((a,b)=>reviewScore(b)-reviewScore(a)));
+  box.innerHTML=TIERS.slice().reverse().map(tier=>{
+    const items=rows[tierIndex(tier)];
+    const itemsHTML=items.length
+      ? items.map(r=>`
+        <div class="tl-item" style="--tc:${tier.color}" onclick="openExpand('${r.id}',this)" title="${esc(r.drink_name)} — ${fmtScore(reviewScore(r))} / 10">
+          <div class="tl-item-photo">
+            ${r.photo_url?`<img src="${esc(r.photo_url)}" alt="${esc(r.drink_name)}" loading="lazy">`:'<i class="ti ti-can"></i>'}
+            <span class="tl-item-marks">${fmtScore(reviewScore(r))}</span>
+          </div>
+          <div class="tl-item-name">${esc(r.drink_name)}</div>
+        </div>`).join('')
+      : '<span class="tl-empty">Пока пусто</span>';
+    return `<div class="tl-row" style="border-color:color-mix(in srgb, ${tier.color} 45%, #2b2117)">
+      <div class="tl-label" style="background:${tier.bg};color:${tier.color}">${tier.name}<small>${items.length} шт.</small></div>
+      <div class="tl-items">${itemsHTML}</div>
+    </div>`;
+  }).join('');
+}
+
+// ─── AUTH PAGE ────────────────────────────────────────────────────────
+let authMode='login';
+function initAuth(){
+  setHash('auth');
+  const login=authMode==='login';
+  document.getElementById('auth-title').textContent=login?'Вход':'Регистрация';
+  document.getElementById('auth-sub').textContent=login?'Войдите, чтобы публиковать обзоры':'Создайте аккаунт за полминуты';
+  document.getElementById('auth-submit').textContent=login?'Войти':'Зарегистрироваться';
+  document.getElementById('auth-toggle').textContent=login?'Нет аккаунта? Зарегистрироваться':'Уже есть аккаунт? Войти';
+}
+function toggleAuthMode(){ authMode=authMode==='login'?'signup':'login'; initAuth(); }
+
+async function submitAuth(){
+  const u=document.getElementById('auth-username').value.trim().toLowerCase();
+  const p=document.getElementById('auth-password').value;
+  if(!u||!p){ showToast('Введите логин и пароль'); return; }
+  if(!/^[a-z0-9_]{3,20}$/.test(u)){ showToast('Логин: 3–20 символов, латиница/цифры'); return; }
+  if(p.length<6){ showToast('Пароль минимум 6 символов'); return; }
+
+  const btn=document.getElementById('auth-submit');
+  btn.disabled=true;
+  const email=u+FAKE_DOMAIN;
+  let res;
+  if(authMode==='signup'){
+    res=await sb.auth.signUp({ email, password:p, options:{ data:{ username:u } } });
+  } else {
+    res=await sb.auth.signInWithPassword({ email, password:p });
+  }
+  btn.disabled=false;
+
+  if(res.error){
+    let m=res.error.message;
+    if(/already registered/i.test(m)) m='Такой логин уже занят';
+    if(/Invalid login/i.test(m)) m='Неверный логин или пароль';
+    if(/Email not confirmed/i.test(m)) m='Включите авто-подтверждение почты в Supabase (шаг 4)';
+    showToast('Ошибка: '+m); return;
+  }
+  const session=res.data.session;
+  if(!session){
+    showToast('Регистрация прошла, но нужен вход. Проверьте, что Confirm email выключен в Supabase.');
+    authMode='login'; initAuth(); return;
+  }
+  currentUser=session.user;
+  refreshAuthUI();
+  await loadAdminFlag();
+  document.getElementById('auth-password').value='';
+  showToast(authMode==='signup'?'Аккаунт создан!':'Вы вошли');
+  route('feed');
+}
+
+async function logout(){
+  await sb.auth.signOut();
+  currentUser=null; isAdmin=false;
+  refreshAuthUI();
+  route('feed');
+  showToast('Вы вышли');
+}
+
+// ─── CREATE / EDIT ────────────────────────────────────────────────────
+let photoFile=null, photoPreviewSrc=null;
+let selectedTier=DEFAULT_TIER;
+let pendingEdit=null, editingReview=null;
+
+function startEdit(id){
+  const r=REVIEW_CACHE[id];
+  if(!r||!currentUser||r.user_id!==currentUser.id){ showToast('Можно редактировать только свои обзоры'); return; }
+  pendingEdit=r;
+  route('create');
+}
+
+function buildTierPicker(){
+  const el=document.getElementById('tier-picker');
+  el.innerHTML=TIERS.slice().reverse().map(t=>
+    `<button type="button" class="tier-opt${t.name===selectedTier?' sel':''}" style="--tc:${t.color}" onclick="pickTier('${t.name}')">${t.name}</button>`
+  ).join('');
+}
+function pickTier(name){ selectedTier=name; buildTierPicker(); updatePreview(); }
+
+function buildSliders(){
+  let html='';
+  BIPOLAR.forEach(b=>{
+    html+=`<div class="bp-edit">
+      <div class="bp-edit-poles">
+        <span class="pole-lbl" id="pl-${b.key}">${b.left}</span>
+        <span class="pole-val" id="sv-${b.key}">0</span>
+        <span class="pole-lbl" id="pr-${b.key}">${b.right}</span>
+      </div>
+      <input type="range" min="0" max="20" step="1" value="10" id="sl-${b.key}" oninput="syncSlider('${b.key}',this.value)">
+    </div>`;
+  });
+  RATINGS.forEach(r=>{
+    html+=`<div class="slider-row">
+      <span class="slider-name"><i class="ti ${r.icon}"></i>${r.label}</span>
+      <input type="range" min="1" max="10" step="1" value="5" id="sl-${r.key}" oninput="syncSlider('${r.key}',this.value)">
+      <span class="slider-val" id="sv-${r.key}">5</span>
+    </div>`;
+  });
+  document.getElementById('sliders-container').innerHTML=html;
+}
+
+function initCreate(){
+  if(!currentUser){ showToast('Войдите, чтобы создать обзор'); route('auth'); return; }
+  setHash('create');
+  editingReview=pendingEdit; pendingEdit=null;
+  photoFile=null; photoPreviewSrc=null;
+  croppedCanvas=null;
+  selectedTier=DEFAULT_TIER;
+  const dz=document.getElementById('c-dropzone');
+  dz.classList.remove('has-image');
+  dz.innerHTML='<i class="ti ti-upload" style="font-size:26px"></i><span>Нажмите или перетащите</span>';
+  document.getElementById('input-drinkname').value='';
+  document.getElementById('input-description').value='';
+  document.getElementById('desc-count').textContent='0 / 800';
+  buildSliders();
+  bindDropzone();
+
+  if(editingReview){
+    const r=editingReview;
+    document.getElementById('create-title').textContent='Редактирование обзора';
+    document.getElementById('create-sub').textContent='Поправь, что нужно, и сохрани — карточка обновится';
+    document.getElementById('submit-btn').innerHTML='<i class="ti ti-check"></i> Сохранить изменения';
+    document.getElementById('input-drinkname').value=r.drink_name||'';
+    document.getElementById('input-description').value=r.description||'';
+    document.getElementById('desc-count').textContent=(r.description||'').length+' / 800';
+    ALL_KEYS.forEach(k=>{
+      const sl=document.getElementById('sl-'+k);
+      const isBp=BIPOLAR.some(b=>b.key===k);
+      // биполярные хранятся кодированно (старый/новый формат) — приводим к шкале слайдера
+      sl.value = r[k]==null ? sl.value : (isBp ? bpVal(r[k]) : r[k]);
+      syncSlider(k, sl.value);
+    });
+    selectedTier=tierByName(r.tier).name;
+    if(r.photo_url){
+      photoPreviewSrc=r.photo_url; // оставляем старое фото, пока не выбрано новое
+      dz.classList.add('has-image');
+      dz.innerHTML='<img src="'+esc(r.photo_url)+'" alt="фото"><span class="recrop-hint"><i class="ti ti-crop"></i> изменить</span>';
+    }
+  } else {
+    document.getElementById('create-title').textContent='Новый обзор';
+    document.getElementById('create-sub').textContent='Загрузи фото, выставь параметры — карточка создастся автоматически';
+    document.getElementById('submit-btn').innerHTML='<i class="ti ti-send"></i> Опубликовать';
+  }
+
+  buildTierPicker();
+  updatePreview();
+  document.getElementById('input-drinkname').oninput=updatePreview;
+  document.getElementById('input-description').oninput=e=>{
+    document.getElementById('desc-count').textContent=e.target.value.length+' / 800';
+    updatePreview();
+  };
+}
+
+function bindDropzone(){
+  const dz=document.getElementById('c-dropzone');
+  document.getElementById('c-file').onchange=e=>{ if(e.target.files[0]) openCrop(e.target.files[0]); e.target.value=''; };
+  dz.ondragover=e=>{e.preventDefault();dz.style.background='var(--s2)'};
+  dz.ondragleave=()=>{dz.style.background=''};
+  dz.ondrop=e=>{e.preventDefault();dz.style.background='';if(e.dataTransfer.files[0])openCrop(e.dataTransfer.files[0])};
+}
+
+// ─── LASSO CROP (вырезание по точкам, без библиотек) ──────────────────
+// пользователь тапами расставляет вершины многоугольника вокруг банки;
+// applyCrop вырезает фигуру через ctx.clip() — всё снаружи прозрачно
+let lassoImg=null, lassoPts=[], lassoScale=1;
+
+function openCrop(file){
+  if(!file.type.startsWith('image/')){ showToast('Это не изображение'); return; }
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    const img=new Image();
+    img.onload=()=>{
+      lassoImg=img; lassoPts=[];
+      const cv=document.getElementById('lassoCanvas');
+      const maxW=Math.min(540, innerWidth-90), maxH=Math.round(innerHeight*0.5);
+      lassoScale=Math.min(maxW/img.width, maxH/img.height, 1);
+      cv.width=Math.max(1,Math.round(img.width*lassoScale));
+      cv.height=Math.max(1,Math.round(img.height*lassoScale));
+      document.getElementById('crop-modal').style.display='flex';
+      drawLasso();
+    };
+    img.src=ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function lassoCanvasPos(e){
+  const cv=document.getElementById('lassoCanvas');
+  const r=cv.getBoundingClientRect();
+  // канвас может быть ужат css max-width — пересчитываем в его пиксели
+  return { x:(e.clientX-r.left)*cv.width/r.width, y:(e.clientY-r.top)*cv.height/r.height };
+}
+
+function drawLasso(){
+  const cv=document.getElementById('lassoCanvas'), ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  if(lassoImg) ctx.drawImage(lassoImg,0,0,cv.width,cv.height);
+  const path=()=>{ ctx.beginPath(); lassoPts.forEach((p,i)=> i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); };
+  if(lassoPts.length>=3){
+    // затемняем отбрасываемое, выбранная область остаётся яркой
+    ctx.save();
+    ctx.fillStyle='rgba(10,8,5,0.5)';
+    ctx.fillRect(0,0,cv.width,cv.height);
+    path(); ctx.closePath(); ctx.clip();
+    ctx.drawImage(lassoImg,0,0,cv.width,cv.height);
+    ctx.restore();
+  }
+  if(lassoPts.length){
+    path();
+    if(lassoPts.length>=3) ctx.closePath();
+    ctx.lineWidth=2.5; ctx.strokeStyle='#39ff14';
+    ctx.setLineDash([7,5]); ctx.stroke(); ctx.setLineDash([]);
+    // неоновые точки с чёрной обводкой; первая — золотая
+    lassoPts.forEach((p,i)=>{
+      ctx.beginPath(); ctx.arc(p.x,p.y,i===0?7:6,0,Math.PI*2);
+      ctx.fillStyle=i===0?'#ffd54a':'#39ff14'; ctx.fill();
+      ctx.lineWidth=3; ctx.strokeStyle='#1a140e'; ctx.stroke();
+    });
+  }
+  const btn=document.getElementById('lasso-apply');
+  if(btn) btn.disabled=lassoPts.length<3;
+}
+
+function lassoReset(){ lassoPts=[]; drawLasso(); }
+
+function cancelCrop(){
+  document.getElementById('crop-modal').style.display='none';
+  lassoImg=null; lassoPts=[];
+}
+
+function applyCrop(){
+  if(!lassoImg||lassoPts.length<3){ showToast('Поставьте минимум 3 точки вокруг банки'); return; }
+  // точки канваса → координаты оригинального фото
+  const pts=lassoPts.map(p=>({ x:p.x/lassoScale, y:p.y/lassoScale }));
+  let x0=Math.max(0,Math.floor(Math.min(...pts.map(p=>p.x))));
+  let y0=Math.max(0,Math.floor(Math.min(...pts.map(p=>p.y))));
+  let x1=Math.min(lassoImg.width, Math.ceil(Math.max(...pts.map(p=>p.x))));
+  let y1=Math.min(lassoImg.height,Math.ceil(Math.max(...pts.map(p=>p.y))));
+  const w=x1-x0, h=y1-y0;
+  if(w<8||h<8){ showToast('Слишком маленькая область'); return; }
+  const k=Math.min(1, 1200/Math.max(w,h));       // не раздуваем файл
+  const out=document.createElement('canvas');
+  out.width=Math.max(1,Math.round(w*k)); out.height=Math.max(1,Math.round(h*k));
+  const ctx=out.getContext('2d');
+  ctx.save();
+  ctx.scale(k,k);
+  ctx.beginPath();
+  pts.forEach((p,i)=> i?ctx.lineTo(p.x-x0,p.y-y0):ctx.moveTo(p.x-x0,p.y-y0));
+  ctx.closePath();
+  ctx.clip();                                     // всё вне лассо — прозрачно
+  ctx.drawImage(lassoImg,-x0,-y0);
+  ctx.restore();
+  croppedCanvas=out;
+  renderPhoto();
+  cancelCrop();
+}
+
+document.getElementById('lassoCanvas').addEventListener('pointerdown',e=>{
+  e.preventDefault();
+  if(!lassoImg) return;
+  lassoPts.push(lassoCanvasPos(e));
+  drawLasso();
+});
+
+// ─── PHOTO (после кропа) ──────────────────────────────────────────────
+// в базу уходит ОРИГИНАЛЬНОЕ кропнутое фото — его можно посмотреть в обзоре.
+// игровая стилизация (постеризация, контуры, low-poly) происходит при
+// рендере 3D-банки, фотографию она не трогает
+let croppedCanvas=null;
+
+function renderPhoto(){
+  if(!croppedCanvas) return;
+  // PNG: лассо даёт прозрачный фон, JPEG его убил бы
+  photoPreviewSrc=croppedCanvas.toDataURL('image/png');
+  croppedCanvas.toBlob(blob=>{
+    photoFile=new File([blob],'photo.png',{type:'image/png'});
+  },'image/png');
+  const dz=document.getElementById('c-dropzone');
+  dz.classList.add('has-image');
+  dz.innerHTML='<img src="'+photoPreviewSrc+'" alt="фото">'
+    +'<span class="recrop-hint"><i class="ti ti-crop"></i> изменить</span>';
+  updatePreview();
+}
+
+function syncSlider(key, val){
+  val=Number(val);
+  const b=BIPOLAR.find(x=>x.key===key);
+  if(b){
+    // bipolar params display earned points (0 at center, 10 at either edge)
+    document.getElementById('sv-'+key).textContent=Math.abs(val-10);
+    document.getElementById('pl-'+key).classList.toggle('active', val<10);
+    document.getElementById('pr-'+key).classList.toggle('active', val>10);
+  } else {
+    document.getElementById('sv-'+key).textContent=val;
+  }
+  updatePreview();
+}
+
+function getSliderValues(){
+  // биполярные значения кодируем как 100+v (новый формат хранения)
+  const v={};
+  ALL_KEYS.forEach(k=>{
+    const raw=parseInt(document.getElementById('sl-'+k).value);
+    v[k]=BIPOLAR.some(b=>b.key===k) ? 100+raw : raw;
+  });
+  return v;
+}
+
+function updatePreview(){
+  const v=getSliderValues();
+  const name=document.getElementById('input-drinkname').value.trim()||'Название напитка';
+  const desc=document.getElementById('input-description').value.trim();
+  const score=calcScore(v);
+  const tier=tierByName(selectedTier);
+  const pc=document.getElementById('preview-card');
+  const letter=tierLetterOf(selectedTier);
+  pc.className='rcard l'+letter+(letter==='S'?' tier-glow':'');
+  pc.style.setProperty('--tc',LETTER_COLORS[letter]);
+  pc.innerHTML=cardHTML({
+    photoSrc:photoPreviewSrc, name, username:currentUsername(),
+    timeText:'только что', score, tier:selectedTier, hasDesc:!!desc,
+    isNew:true, isTrash:score<3, interactive:false
+  });
+  hydrateCanSnaps(pc);
+}
+
+async function submitReview(){
+  if(!currentUser){ showToast('Войдите, чтобы публиковать'); route('auth'); return; }
+  const drink_name=document.getElementById('input-drinkname').value.trim();
+  if(!drink_name){ showToast('Введите название напитка'); return; }
+
+  const editing=editingReview;
+  const btn=document.getElementById('submit-btn');
+  btn.disabled=true;
+  btn.innerHTML='<i class="ti ti-loader-2" style="animation:spin 0.6s linear infinite"></i> '+(editing?'Сохраняем...':'Публикуем...');
+  const restoreBtn=()=>{
+    btn.disabled=false;
+    btn.innerHTML=editing?'<i class="ti ti-check"></i> Сохранить изменения':'<i class="ti ti-send"></i> Опубликовать';
+  };
+
+  const v=getSliderValues();
+  const score=calcScore(v);
+  const username=currentUsername();
+  const description=document.getElementById('input-description').value.trim()||null;
+
+  // при редактировании старое фото сохраняется, пока не загружено новое
+  let photo_url = editing ? (editing.photo_url||null) : null;
+  if(photoFile){
+    const path=`${currentUser.id}/${Date.now()}.png`;
+    const { error:upErr } = await sb.storage.from('drink-photos').upload(path, photoFile, {upsert:true, contentType:'image/png'});
+    if(upErr){
+      showToast('Фото не загрузилось: '+upErr.message, 4000);
+    } else {
+      const { data:pub } = sb.storage.from('drink-photos').getPublicUrl(path);
+      photo_url=pub.publicUrl;
+    }
+  }
+
+  const row={ user_id:currentUser.id, username, drink_name, photo_url, description, score, tier:selectedTier };
+  ALL_KEYS.forEach(k=>row[k]=v[k]);
+
+  let error=null;
+  if(editing){
+    const res=await sb.from('reviews').update(row).eq('id',editing.id).select();
+    error=res.error;
+    if(!error && (!res.data||!res.data.length)){
+      restoreBtn();
+      showToast('Не сохранилось: в Supabase нет права на изменение. Выполните в SQL Editor: create policy "update own" on reviews for update using (auth.uid() = user_id);', 8000);
+      return;
+    }
+  } else {
+    const res=await sb.from('reviews').insert(row);
+    error=res.error;
+  }
+
+  restoreBtn();
+  if(error){
+    let m=error.message;
+    if(/description/.test(m)&&/column/i.test(m)) m='В базе нет колонки description — выполните в SQL Editor: alter table reviews add column if not exists description text;';
+    showToast('Ошибка: '+m, 5000); return;
+  }
+  showToast(editing?'Изменения сохранены!':'Обзор опубликован!');
+  editingReview=null;
+  route('feed');
+}
+
+// ─── PWA (install on phone home screen) ───────────────────────────────
+function setupPWA(){
+  try{
+    // generate an icon on the fly so the single file stays self-contained
+    const makeIcon=size=>{
+      const c=document.createElement('canvas'); c.width=c.height=size;
+      const x=c.getContext('2d');
+      x.fillStyle='#f6ead0'; x.fillRect(0,0,size,size);
+      // lightning bolt with a warm glow
+      const cx=size/2, cy=size*0.44, s=size*0.62;
+      const g=x.createLinearGradient(cx,cy-s/2,cx,cy+s/2);
+      g.addColorStop(0,'#ffd54a'); g.addColorStop(1,'#ff7a1f');
+      x.shadowColor='rgba(255,160,60,0.9)'; x.shadowBlur=size*0.08;
+      x.fillStyle=g;
+      x.beginPath();
+      x.moveTo(cx+s*0.10, cy-s*0.50);
+      x.lineTo(cx-s*0.28, cy+s*0.10);
+      x.lineTo(cx-s*0.02, cy+s*0.10);
+      x.lineTo(cx-s*0.12, cy+s*0.50);
+      x.lineTo(cx+s*0.28, cy-s*0.12);
+      x.lineTo(cx+s*0.02, cy-s*0.12);
+      x.closePath(); x.fill();
+      x.shadowBlur=0;
+      x.fillStyle='#2b2117';
+      x.font='bold '+(size*0.14)+'px -apple-system,Segoe UI,sans-serif';
+      x.textAlign='center';
+      x.fillText('СКЕС',cx,size*0.9);
+      return c.toDataURL('image/png');
+    };
+    const icon512=makeIcon(512), icon192=makeIcon(192);
+    const manifest={
+      name:'Скес машина', short_name:'Скес',
+      description:'Обзоры на энергетики',
+      start_url:location.href.split('#')[0],
+      display:'standalone', background_color:'#f6ead0', theme_color:'#f6ead0',
+      icons:[
+        {src:icon192,sizes:'192x192',type:'image/png'},
+        {src:icon512,sizes:'512x512',type:'image/png'}
+      ]
+    };
+    const blob=new Blob([JSON.stringify(manifest)],{type:'application/manifest+json'});
+    const link=document.createElement('link');
+    link.rel='manifest'; link.href=URL.createObjectURL(blob);
+    document.head.appendChild(link);
+    const apple=document.createElement('link');
+    apple.rel='apple-touch-icon'; apple.href=icon192;
+    document.head.appendChild(apple);
+  }catch(e){ /* PWA is a bonus; never block the app */ }
+}
+
+// ─── INIT ─────────────────────────────────────────────────────────────
+async function init(){
+  setupPWA();
+  if(!initSupabase()){
+    document.getElementById('setup-modal').style.display='flex';
+    return;
+  }
+  const { data:{ session } } = await sb.auth.getSession();
+  currentUser=session?.user||null;
+  refreshAuthUI();
+  await loadAdminFlag();
+  sb.auth.onAuthStateChange((_e, sess)=>{ currentUser=sess?.user||null; refreshAuthUI(); loadAdminFlag(); });
+  routeFromHash();
+}
+init();
+</script>
+</body>
+</html>
