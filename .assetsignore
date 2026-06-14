@@ -2,3 +2,5 @@ PRODUCT.md
 DESIGN.md
 .impeccable/
 wrangler.jsonc
+worker.js
+TELEGRAM_SETUP.md

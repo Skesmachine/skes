@@ -14,6 +14,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Rubik:wght@400;500;600;700;800;900&family=Unbounded:wght@500;700;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
+<!-- Telegram Mini App SDK: тема, разворот, вход через Telegram -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <!-- Three.js (ES-модули, без сборки) — для 3D-банки в развёрнутой карточке -->
 <script type="importmap">
 { "imports": {
@@ -1066,6 +1068,12 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.25)}
 /* AUTH PAGE — вход как вскрытие бустера: карточка с чернильной рамкой */
 .auth-wrap{max-width:400px;margin:3rem auto;padding:2.5rem 2rem;background:var(--s1);border:3px solid var(--ink);border-radius:18px;box-shadow:7px 7px 0 var(--ink);transform:rotate(-0.5deg)}
 @media(max-width:460px){.auth-wrap{margin:1.5rem 0.85rem;padding:2rem 1.25rem}}
+.auth-or{display:flex;align-items:center;gap:10px;margin:14px 2px 12px;color:var(--text3);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
+.auth-or::before,.auth-or::after{content:'';flex:1;height:2px;background:var(--border2);opacity:.5}
+.profile-tg{margin-top:8px}
+.profile-tg .tg-status{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:#2a7fb8;font-weight:600}
+.profile-tg .tg-status.muted{color:var(--text3);font-weight:500}
+.profile-tg .tg-status i,.profile-tg .btn i{font-size:15px;color:#2aabee}
 .auth-wrap h2{position:relative;display:table;margin:0 auto 0.5rem;font-size:24px;font-weight:700;text-transform:uppercase;text-align:center;transform:rotate(-1deg)}
 .auth-wrap h2::after{
   content:'';position:absolute;left:-3px;right:-7px;bottom:-8px;height:8px;
@@ -1330,6 +1338,7 @@ button:focus-visible,.btn:focus-visible,a:focus-visible{outline:3px dashed var(-
       <div>
         <div class="profile-name" id="profile-username"></div>
         <div class="profile-stats" id="profile-stats"></div>
+        <div class="profile-tg" id="profile-tg" style="display:none"></div>
       </div>
     </div>
     <div class="profile-toolbar">
@@ -1358,6 +1367,8 @@ button:focus-visible,.btn:focus-visible,a:focus-visible{outline:3px dashed var(-
     </div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:12px" id="auth-submit" onclick="submitAuth()">Войти</button>
     <button class="auth-toggle" id="auth-toggle" onclick="toggleAuthMode()">Нет аккаунта? Зарегистрироваться</button>
+    <div class="auth-or"><span>или</span></div>
+    <button class="btn" style="width:100%;justify-content:center;padding:11px" onclick="tgLoginClick()"><i class="ti ti-brand-telegram" style="font-size:17px"></i> Войти через Telegram</button>
   </div>
 </div>
 
@@ -1972,12 +1983,13 @@ function showExpandCard(html, tierColor, sourceEl){
   card.style.setProperty('--tc',tierColor);
   card.innerHTML=html;
   ov.style.display='flex';
+  if(TG&&TG.BackButton) TG.BackButton.show();
   // банка сразу в 3D: кнопкой «фото» можно вернуть плоский снимок.
   // setTimeout вместо rAF — rAF в фоновой вкладке может не выстрелить вовсе
-  // 3D монтируем ПОСЛЕ анимации открытия — тяжёлая инициализация WebGL не
-  // конкурирует с анимацией, карточка открывается плавно (фото видно сразу)
+  // 3D монтируем сразу (на след. кадре) — банка появляется ВМЕСТЕ с шоквейвом.
+  // Анимация открытия — на компоститоре (transform/opacity), WebGL её не тормозит
   const auto3d=card.querySelector('.can3d-btn');
-  if(auto3d) setTimeout(()=>{ if(!auto3d.classList.contains('active')) toggleCan3D(auto3d); },360);
+  if(auto3d) setTimeout(()=>{ if(!auto3d.classList.contains('active')) toggleCan3D(auto3d); },40);
   document.body.style.overflow='hidden';
 
   // FLIP: animate from the source card position to the centered layout
@@ -2037,6 +2049,7 @@ function toggleCan3D(btn){
 function closeExpand(instant){
   const ov=document.getElementById('expand-overlay');
   if(ov.style.display!=='flex') return;
+  if(TG&&TG.BackButton) TG.BackButton.hide();
   const stage=document.getElementById('can3d-stage');
   if(stage && window.unmountCan3D) unmountCan3D(stage);
   const card=document.getElementById('expand-card');
@@ -2507,6 +2520,7 @@ async function loadProfile(username){
   setHash('profile/'+encodeURIComponent(username));
   document.getElementById('profile-username').textContent='@'+username;
   document.getElementById('profile-avatar').textContent=(username[0]||'?').toUpperCase();
+  renderProfileTg();
   document.getElementById('profile-stats').textContent='Загружаем...';
   const grid=document.getElementById('profile-grid');
   grid.innerHTML='<div class="spinner"></div>';
@@ -2626,6 +2640,85 @@ async function logout(){
   refreshAuthUI();
   route('feed');
   showToast('Вы вышли');
+}
+
+// ─── TELEGRAM MINI APP + ВХОД ─────────────────────────────────────────
+// Сервер /telegram-auth (Cloudflare Worker) проверяет подпись Telegram и
+// выдаёт одноразовый token_hash → клиент логинится через verifyOtp.
+const TG = window.Telegram && window.Telegram.WebApp;
+const TG_AUTH_URL = '/telegram-auth';
+const TG_BOT_USERNAME = '';   // ← @username бота для входа из обычного браузера (для Mini App не нужно)
+function tgIsMiniApp(){ return !!(TG && TG.initData && TG.initData.length); }
+
+function initTelegramApp(){
+  if(!TG) return;
+  try{
+    TG.ready();
+    TG.expand();
+    if(TG.disableVerticalSwipes) TG.disableVerticalSwipes();
+    if(TG.setHeaderColor) TG.setHeaderColor('#f6ead0');
+    if(TG.setBackgroundColor) TG.setBackgroundColor('#f6ead0');
+    document.documentElement.classList.add('tg-app');
+    if(TG.BackButton) TG.BackButton.onClick(()=>{ if(document.getElementById('expand-overlay').style.display==='flex') closeExpand(); });
+  }catch(e){}
+}
+function tgErr(m){
+  m=String(m||'');
+  if(/server_not_configured/.test(m)) return 'сервер ещё не настроен (секреты бота в Cloudflare)';
+  if(/verify_failed/.test(m)) return 'подпись Telegram не сошлась';
+  if(/tg_taken/.test(m)) return 'этот Telegram уже привязан к другому аккаунту';
+  if(/invalid_session|no_session/.test(m)) return 'нужно войти в аккаунт';
+  return m;
+}
+async function tgPost(body){
+  const r=await fetch(TG_AUTH_URL,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  let d={}; try{ d=await r.json(); }catch(e){}
+  if(!r.ok||d.error) throw new Error(d.error||('http_'+r.status));
+  return d;
+}
+async function tgLoginWithInitData(silent){
+  if(!sb){ if(!silent) showToast('Сначала настройте Supabase'); return; }
+  try{
+    const d=await tgPost({action:'login', initData:TG.initData});
+    const { error }=await sb.auth.verifyOtp({ token_hash:d.token_hash, type:'magiclink' });
+    if(error) throw error;
+    if(!silent) showToast('Вы вошли через Telegram');
+    route('feed');
+  }catch(e){ if(!silent) showToast('Telegram-вход не удался: '+tgErr(e.message)); }
+}
+function tgLoginClick(){
+  if(tgIsMiniApp()) return tgLoginWithInitData(false);
+  showToast('Вход через Telegram работает внутри Telegram — откройте «Скес машину» через бота (Mini App).');
+}
+async function tgLinkClick(){
+  if(!currentUser){ route('auth'); return; }
+  if(!tgIsMiniApp()){ showToast('Привязать Telegram можно из Telegram Mini App'); return; }
+  try{
+    const { data:{ session } }=await sb.auth.getSession();
+    const d=await tgPost({action:'link', initData:TG.initData, accessToken:session.access_token});
+    showToast('Telegram привязан'+(d.username?': @'+d.username:''));
+    renderProfileTg();
+  }catch(e){ showToast('Не удалось привязать: '+tgErr(e.message)); }
+}
+async function tgGetMyLink(){
+  if(!currentUser||!sb) return null;
+  try{ const { data }=await sb.from('tg_links').select('telegram_id,username').eq('user_id',currentUser.id); return data&&data[0]?data[0]:null; }
+  catch(e){ return null; }
+}
+async function renderProfileTg(){
+  const box=document.getElementById('profile-tg'); if(!box) return;
+  const shown=document.getElementById('profile-username').textContent.replace('@','');
+  const own=currentUser && currentUsername() && shown===currentUsername();
+  if(!own){ box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display='';
+  const link=await tgGetMyLink();
+  if(link){
+    box.innerHTML=`<span class="tg-status"><i class="ti ti-brand-telegram"></i> Telegram привязан${link.username?': @'+esc(link.username):''}</span>`;
+  } else if(tgIsMiniApp()){
+    box.innerHTML=`<button class="btn btn-sm" onclick="tgLinkClick()"><i class="ti ti-brand-telegram"></i> Привязать Telegram</button>`;
+  } else {
+    box.innerHTML=`<span class="tg-status muted"><i class="ti ti-brand-telegram"></i> Привязка — из Mini App</span>`;
+  }
 }
 
 // ─── CREATE / EDIT ────────────────────────────────────────────────────
@@ -3023,6 +3116,7 @@ function setupPWA(){
 // ─── INIT ─────────────────────────────────────────────────────────────
 async function init(){
   setupPWA();
+  initTelegramApp();
   if(!initSupabase()){
     document.getElementById('setup-modal').style.display='flex';
     return;
@@ -3032,6 +3126,8 @@ async function init(){
   refreshAuthUI();
   await loadAdminFlag();
   sb.auth.onAuthStateChange((_e, sess)=>{ currentUser=sess?.user||null; refreshAuthUI(); loadAdminFlag(); });
+  // запущены внутри Telegram и ещё не залогинены → тихий вход по подписи Telegram
+  if(!currentUser && tgIsMiniApp()) await tgLoginWithInitData(true);
   routeFromHash();
 }
 init();

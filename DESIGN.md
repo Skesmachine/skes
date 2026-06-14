@@ -73,3 +73,4 @@ drink_name хранится одной строкой «Бренд ¦ Вкус»
 - Канонический файл: `C:\Users\markf\OneDrive\Рабочий стол\Скес машина.html`; деплой-копия `skes/index.html`.
 - Фактура камня (пиксельная, overlay) — единственная допустимая текстура; никаких других фототекстур поверх UI; никакого «живого стола» с предметами (отвергнуто).
 - Supabase-логика, авторизация, лайки, тирлист и пайплайн банок не трогаются.
+- **Telegram Mini App + вход** (с 14.06.2026): SDK `telegram-web-app.js`; внутри Telegram — авто-вход по подписи `initData`, разворот, тема, BackButton. Проверка подписи и выдача сессии — серверный Cloudflare Worker `worker.js` (`POST /telegram-auth`, секреты `BOT_TOKEN`/`SUPABASE_URL`/`SUPABASE_SERVICE_ROLE`); сопоставление telegram_id↔user_id в таблице `tg_links`. «Привязать Telegram» — на своём профиле. Деплой и SQL — в `TELEGRAM_SETUP.md`.
