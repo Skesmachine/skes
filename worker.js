@@ -15,11 +15,13 @@
 
 const TG_MAX_AGE = 86400; // initData/widget не старше суток
 const TG_EMAIL_DOMAIN = 'telegram.skesmachina.app';
+const LOGIN_DOMAIN = '@skesmachina.app'; // логин-почта = username@skesmachina.app
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/telegram-auth') return handleTelegramAuth(request, env);
+    if (url.pathname === '/account-rename') return handleRename(request, env);
     return env.ASSETS.fetch(request);
   }
 };
@@ -102,6 +104,48 @@ async function userIdFromToken(env, accessToken) {
   const r = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, { headers: { apikey: env.SUPABASE_SERVICE_ROLE, authorization: `Bearer ${accessToken}` } });
   if (!r.ok) return null;
   const u = await r.json(); return u.id || null;
+}
+async function adminGetUser(env, userId) {
+  const r = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users/${userId}`, { headers: sbHeaders(env) });
+  if (!r.ok) return null; return r.json();
+}
+async function adminUpdateUser(env, userId, patch) {
+  const r = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users/${userId}`, { method: 'PUT', headers: sbHeaders(env), body: JSON.stringify(patch) });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.msg || d.message || 'update_failed');
+  return d;
+}
+async function patchReviewsUsername(env, userId, username) {
+  await fetch(`${env.SUPABASE_URL}/rest/v1/reviews?user_id=eq.${userId}`, {
+    method: 'PATCH', headers: { ...sbHeaders(env), Prefer: 'return=minimal' }, body: JSON.stringify({ username })
+  });
+}
+
+// смена имени профиля: имя в metadata + логин-почта + во всех обзорах автора
+async function handleRename(request, env) {
+  if (request.method !== 'POST') return json({ error: 'method' }, 405);
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE) return json({ error: 'server_not_configured' }, 500);
+  let body; try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+  const newName = String(body.newUsername || '').toLowerCase().trim();
+  if (!/^[a-z0-9_]{3,20}$/.test(newName)) return json({ error: 'bad_name' }, 400);
+  if (!body.accessToken) return json({ error: 'no_session' }, 401);
+  const userId = await userIdFromToken(env, body.accessToken);
+  if (!userId) return json({ error: 'invalid_session' }, 401);
+  try {
+    const u = await adminGetUser(env, userId);
+    if (!u) return json({ error: 'no_user' }, 404);
+    const meta = { ...(u.user_metadata || {}), username: newName };
+    try {
+      await adminUpdateUser(env, userId, { email: newName + LOGIN_DOMAIN, email_confirm: true, user_metadata: meta });
+    } catch (e) {
+      if (/registered|exists|duplicate|already/i.test(String(e.message))) return json({ error: 'name_taken' }, 409);
+      throw e;
+    }
+    await patchReviewsUsername(env, userId, newName);
+    return json({ ok: true, username: newName });
+  } catch (e) {
+    return json({ error: String(e.message || e) }, 500);
+  }
 }
 
 async function handleTelegramAuth(request, env) {

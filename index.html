@@ -1074,6 +1074,15 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.25)}
 .profile-tg .tg-status{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:#2a7fb8;font-weight:600}
 .profile-tg .tg-status.muted{color:var(--text3);font-weight:500}
 .profile-tg .tg-status i,.profile-tg .btn i{font-size:15px;color:#2aabee}
+.acct-tg{margin-bottom:8px}
+.acct-more{margin-top:2px;font-size:13px}
+.acct-more summary{cursor:pointer;color:var(--text2);font-weight:600;display:inline-flex;align-items:center;gap:6px;list-style:none;padding:2px 0}
+.acct-more summary::-webkit-details-marker{display:none}
+.acct-more summary i{font-size:15px}
+.acct-lab{display:block;font-size:11.5px;color:var(--text3);margin:10px 0 4px;text-transform:uppercase;letter-spacing:.05em}
+.acct-inline{display:flex;gap:8px;align-items:stretch;max-width:360px}
+.acct-inline .text-input{flex:1;min-width:0}
+.acct-inline .btn{flex:0 0 auto;white-space:nowrap}
 .auth-wrap h2{position:relative;display:table;margin:0 auto 0.5rem;font-size:24px;font-weight:700;text-transform:uppercase;text-align:center;transform:rotate(-1deg)}
 .auth-wrap h2::after{
   content:'';position:absolute;left:-3px;right:-7px;bottom:-8px;height:8px;
@@ -2670,12 +2679,13 @@ function tgErr(m){
   if(/invalid_session|no_session/.test(m)) return 'нужно войти в аккаунт';
   return m;
 }
-async function tgPost(body){
-  const r=await fetch(TG_AUTH_URL,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+async function apiPost(url, body){
+  const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
   let d={}; try{ d=await r.json(); }catch(e){}
   if(!r.ok||d.error) throw new Error(d.error||('http_'+r.status));
   return d;
 }
+async function tgPost(body){ return apiPost(TG_AUTH_URL, body); }
 async function tgLoginWithInitData(silent){
   if(!sb){ if(!silent) showToast('Сначала настройте Supabase'); return; }
   try{
@@ -2712,13 +2722,53 @@ async function renderProfileTg(){
   if(!own){ box.style.display='none'; box.innerHTML=''; return; }
   box.style.display='';
   const link=await tgGetMyLink();
+  let tgRow;
   if(link){
-    box.innerHTML=`<span class="tg-status"><i class="ti ti-brand-telegram"></i> Telegram привязан${link.username?': @'+esc(link.username):''}</span>`;
+    tgRow=`<span class="tg-status"><i class="ti ti-brand-telegram"></i> Telegram привязан${link.username?': @'+esc(link.username):''}</span>`;
   } else if(tgIsMiniApp()){
-    box.innerHTML=`<button class="btn btn-sm" onclick="tgLinkClick()"><i class="ti ti-brand-telegram"></i> Привязать Telegram</button>`;
+    tgRow=`<button class="btn btn-sm" onclick="tgLinkClick()"><i class="ti ti-brand-telegram"></i> Привязать Telegram</button>`;
   } else {
-    box.innerHTML=`<span class="tg-status muted"><i class="ti ti-brand-telegram"></i> Привязка — из Mini App</span>`;
+    tgRow=`<span class="tg-status muted"><i class="ti ti-brand-telegram"></i> Привязка — из Mini App</span>`;
   }
+  box.innerHTML=`
+    <div class="acct-tg">${tgRow}</div>
+    <details class="acct-more">
+      <summary><i class="ti ti-settings"></i> Настройки аккаунта</summary>
+      <label class="acct-lab">Имя профиля (латиницей)</label>
+      <div class="acct-inline">
+        <input class="text-input" id="acct-name" maxlength="20" value="${esc(currentUsername())}" autocomplete="off">
+        <button class="btn btn-sm" onclick="renameAccount()">Сохранить</button>
+      </div>
+      <label class="acct-lab">Новый пароль</label>
+      <div class="acct-inline">
+        <input class="text-input" id="acct-pass" type="password" placeholder="минимум 6 символов" autocomplete="new-password">
+        <button class="btn btn-sm" onclick="changePassword()">Сменить</button>
+      </div>
+    </details>`;
+}
+
+async function renameAccount(){
+  const v=(document.getElementById('acct-name').value||'').toLowerCase().trim();
+  if(!/^[a-z0-9_]{3,20}$/.test(v)){ showToast('Имя: 3–20 символов, латиница/цифры/_'); return; }
+  if(v===currentUsername()){ showToast('Это и так твоё имя'); return; }
+  try{
+    const { data:{ session } }=await sb.auth.getSession();
+    const d=await apiPost('/account-rename',{ accessToken:session.access_token, newUsername:v });
+    const { data:{ user } }=await sb.auth.getUser(); if(user) currentUser=user;
+    refreshAuthUI();
+    showToast('Имя профиля изменено на @'+d.username);
+    route('profile', d.username);
+  }catch(e){
+    showToast(/name_taken/.test(e.message)?'Это имя уже занято':'Не удалось переименовать: '+tgErr(e.message));
+  }
+}
+
+async function changePassword(){
+  const inp=document.getElementById('acct-pass'); const v=inp.value||'';
+  if(v.length<6){ showToast('Пароль минимум 6 символов'); return; }
+  const { error }=await sb.auth.updateUser({ password:v });
+  if(error){ showToast('Не удалось сменить пароль: '+error.message); return; }
+  inp.value=''; showToast('Пароль обновлён');
 }
 
 // ─── CREATE / EDIT ────────────────────────────────────────────────────
