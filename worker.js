@@ -15,7 +15,10 @@
 
 const TG_MAX_AGE = 86400; // initData/widget не старше суток
 const TG_EMAIL_DOMAIN = 'telegram.skesmachina.app';
-const LOGIN_DOMAIN = '@skesmachina.app'; // логин-почта = username@skesmachina.app
+const LOGIN_DOMAIN = '@skesmachina.app'; // логин-почта = slug(имя)@skesmachina.app
+// имя профиля может быть кириллицей; почта входа — ASCII-транслит
+const RU2LAT = {'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'e','ж':'zh','з':'z','и':'i','й':'i','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u','ф':'f','х':'h','ц':'ts','ч':'ch','ш':'sh','щ':'sch','ъ':'','ы':'y','ь':'','э':'e','ю':'yu','я':'ya'};
+function ruSlug(name){ return String(name || '').toLowerCase().trim().split('').map(c => RU2LAT[c] !== undefined ? RU2LAT[c] : c).join('').replace(/[^a-z0-9_]/g, ''); }
 
 export default {
   async fetch(request, env) {
@@ -127,7 +130,9 @@ async function handleRename(request, env) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE) return json({ error: 'server_not_configured' }, 500);
   let body; try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
   const newName = String(body.newUsername || '').toLowerCase().trim();
-  if (!/^[a-z0-9_]{3,20}$/.test(newName)) return json({ error: 'bad_name' }, 400);
+  if (!/^[a-zа-яё0-9_]{3,20}$/u.test(newName)) return json({ error: 'bad_name' }, 400);
+  const slug = ruSlug(newName);
+  if (slug.length < 2) return json({ error: 'bad_name' }, 400);
   if (!body.accessToken) return json({ error: 'no_session' }, 401);
   const userId = await userIdFromToken(env, body.accessToken);
   if (!userId) return json({ error: 'invalid_session' }, 401);
@@ -136,7 +141,7 @@ async function handleRename(request, env) {
     if (!u) return json({ error: 'no_user' }, 404);
     const meta = { ...(u.user_metadata || {}), username: newName };
     try {
-      await adminUpdateUser(env, userId, { email: newName + LOGIN_DOMAIN, email_confirm: true, user_metadata: meta });
+      await adminUpdateUser(env, userId, { email: slug + LOGIN_DOMAIN, email_confirm: true, user_metadata: meta });
     } catch (e) {
       if (/registered|exists|duplicate|already/i.test(String(e.message))) return json({ error: 'name_taken' }, 409);
       throw e;
