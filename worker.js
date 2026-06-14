@@ -191,9 +191,11 @@ async function handleClaim(request, env) {
       await fetch(`${env.SUPABASE_URL}/rest/v1/reviews?user_id=eq.${curId}`, {
         method: 'PATCH', headers: { ...sbHeaders(env), Prefer: 'return=minimal' }, body: JSON.stringify({ user_id: mainId, username: mainName })
       });
-      // удаляем осиротевший авто-аккаунт (только если это телеграм-почта)
+      // удаляем осиротевший авто-аккаунт: был привязан к Telegram (мы только что
+      // увели его привязку) или почта телеграмная. Обзоры уже перевешены на старый.
+      const hadLink = Array.isArray(links) && links.length > 0;
       const cu = await adminGetUser(env, curId);
-      if (cu && /@telegram\./.test(cu.email || '')) {
+      if (cu && (hadLink || /@telegram\./.test(cu.email || ''))) {
         await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users/${curId}`, { method: 'DELETE', headers: sbHeaders(env) });
       }
     }
