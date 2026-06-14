@@ -2784,19 +2784,8 @@ async function renderProfileTg(){
       <div class="tg-hint">Тогда при забытом пароле войдёшь через Telegram и поставишь новый.</div>`;
   }
   const isTgAuto=/@telegram\./.test((currentUser&&currentUser.email)||'');
-  const claimBlock = isTgAuto ? `
-    <div class="acct-claim">
-      <div class="acct-claim-ttl"><i class="ti ti-alert-triangle"></i> Обзоры на старом аккаунте?</div>
-      <div class="tg-hint" style="margin:4px 0 8px">Вход через Telegram создал новый аккаунт. Введи логин и пароль старого — перенесём обзоры сюда и привяжем Telegram к нему.</div>
-      <label class="acct-lab">Логин старого аккаунта</label>
-      <input class="text-input" id="claim-login" placeholder="старый логин" autocomplete="off">
-      <label class="acct-lab">Пароль</label>
-      <input class="text-input" id="claim-pass" type="password" placeholder="пароль" autocomplete="off">
-      <button class="btn btn-sm btn-primary" style="margin-top:8px" onclick="claimAccount()"><i class="ti ti-transfer-in"></i> Перенести обзоры сюда</button>
-    </div>` : '';
   box.innerHTML=`
     <div class="acct-tg">${tgRow}</div>
-    ${claimBlock}
     <details class="acct-more">
       <summary><i class="ti ti-settings"></i> Настройки аккаунта</summary>
       <label class="acct-lab">Имя профиля (можно по-русски)</label>
@@ -2809,6 +2798,15 @@ async function renderProfileTg(){
         <input class="text-input" id="acct-pass" type="password" placeholder="минимум 6 символов" autocomplete="new-password">
         <button class="btn btn-sm" onclick="changePassword()">Сменить</button>
       </div>
+    </details>
+    <details class="acct-more"${isTgAuto?' open':''}>
+      <summary><i class="ti ti-transfer-in"></i> Перенести обзоры со старого аккаунта</summary>
+      <div class="tg-hint" style="margin:6px 0 8px">Если обзоры остались на аккаунте с логином/паролем — войди в него здесь, обзоры и привязка Telegram переедут на него.</div>
+      <label class="acct-lab">Логин старого аккаунта</label>
+      <input class="text-input" id="claim-login" placeholder="старый логин" autocomplete="off" style="width:100%">
+      <label class="acct-lab">Пароль</label>
+      <input class="text-input" id="claim-pass" type="password" placeholder="пароль" autocomplete="off" style="width:100%">
+      <button class="btn btn-sm btn-primary" style="margin-top:8px" onclick="claimAccount()"><i class="ti ti-transfer-in"></i> Перенести</button>
     </details>`;
 }
 
