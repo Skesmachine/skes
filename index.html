@@ -1070,6 +1070,7 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.25)}
 @media(max-width:460px){.auth-wrap{margin:1.5rem 0.85rem;padding:2rem 1.25rem}}
 .auth-or{display:flex;align-items:center;gap:10px;margin:14px 2px 12px;color:var(--text3);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
 .auth-or::before,.auth-or::after{content:'';flex:1;height:2px;background:var(--border2);opacity:.5}
+.tg-login-slot{display:flex;justify-content:center;min-height:44px}
 .profile-tg{margin-top:8px}
 .profile-tg .tg-status{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:#2a7fb8;font-weight:600}
 .profile-tg .tg-status.muted{color:var(--text3);font-weight:500}
@@ -1377,7 +1378,7 @@ button:focus-visible,.btn:focus-visible,a:focus-visible{outline:3px dashed var(-
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:12px" id="auth-submit" onclick="submitAuth()">Войти</button>
     <button class="auth-toggle" id="auth-toggle" onclick="toggleAuthMode()">Нет аккаунта? Зарегистрироваться</button>
     <div class="auth-or"><span>или</span></div>
-    <button class="btn" style="width:100%;justify-content:center;padding:11px" onclick="tgLoginClick()"><i class="ti ti-brand-telegram" style="font-size:17px"></i> Войти через Telegram</button>
+    <div id="tg-login-slot" class="tg-login-slot"></div>
   </div>
 </div>
 
@@ -2602,6 +2603,7 @@ function initAuth(){
   document.getElementById('auth-sub').textContent=login?'Войдите, чтобы публиковать обзоры':'Создайте аккаунт за полминуты';
   document.getElementById('auth-submit').textContent=login?'Войти':'Зарегистрироваться';
   document.getElementById('auth-toggle').textContent=login?'Нет аккаунта? Зарегистрироваться':'Уже есть аккаунт? Войти';
+  mountTgLogin();
 }
 function toggleAuthMode(){ authMode=authMode==='login'?'signup':'login'; initAuth(); }
 
@@ -2656,7 +2658,7 @@ async function logout(){
 // выдаёт одноразовый token_hash → клиент логинится через verifyOtp.
 const TG = window.Telegram && window.Telegram.WebApp;
 const TG_AUTH_URL = '/telegram-auth';
-const TG_BOT_USERNAME = '';   // ← @username бота для входа из обычного браузера (для Mini App не нужно)
+const TG_BOT_USERNAME = 'skesmachine_bot';   // бот для входа из браузера (Login Widget); для Mini App не нужен
 function tgIsMiniApp(){ return !!(TG && TG.initData && TG.initData.length); }
 
 function initTelegramApp(){
@@ -2699,6 +2701,41 @@ async function tgLoginWithInitData(silent){
 function tgLoginClick(){
   if(tgIsMiniApp()) return tgLoginWithInitData(false);
   showToast('Вход через Telegram работает внутри Telegram — откройте «Скес машину» через бота (Mini App).');
+}
+// кнопка входа на странице авторизации: в Telegram — initData, в браузере —
+// официальный Telegram Login Widget (нужен /setdomain у бота), иначе подсказка
+let tgWidgetMounted=false;
+function mountTgLogin(){
+  const slot=document.getElementById('tg-login-slot'); if(!slot) return;
+  if(tgIsMiniApp()){
+    slot.innerHTML=`<button class="btn" style="width:100%;justify-content:center;padding:11px" onclick="tgLoginClick()"><i class="ti ti-brand-telegram" style="font-size:17px"></i> Войти через Telegram</button>`;
+    return;
+  }
+  if(TG_BOT_USERNAME){
+    if(tgWidgetMounted) return;        // виджет сам себя заменяет на кнопку — не пересоздаём
+    tgWidgetMounted=true;
+    slot.innerHTML='';
+    const s=document.createElement('script');
+    s.async=true; s.src='https://telegram.org/js/telegram-widget.js?22';
+    s.setAttribute('data-telegram-login', TG_BOT_USERNAME);
+    s.setAttribute('data-size','large');
+    s.setAttribute('data-radius','10');
+    s.setAttribute('data-onauth','onTelegramAuth(user)');
+    slot.appendChild(s);
+    return;
+  }
+  slot.innerHTML=`<button class="btn" style="width:100%;justify-content:center;padding:11px" onclick="tgLoginClick()"><i class="ti ti-brand-telegram" style="font-size:17px"></i> Войти через Telegram</button>`;
+}
+window.onTelegramAuth=function(user){ tgWidgetLogin(user); };
+async function tgWidgetLogin(user){
+  if(!sb){ showToast('Сначала настройте Supabase'); return; }
+  try{
+    const d=await apiPost(TG_AUTH_URL,{ action:'login', widget:user });
+    const { error }=await sb.auth.verifyOtp({ token_hash:d.token_hash, type:'magiclink' });
+    if(error) throw error;
+    showToast('Вы вошли через Telegram');
+    route('feed');
+  }catch(e){ showToast('Telegram-вход не удался: '+tgErr(e.message)); }
 }
 async function tgLinkClick(){
   if(!currentUser){ route('auth'); return; }
