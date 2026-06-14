@@ -25,6 +25,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/telegram-auth') return handleTelegramAuth(request, env);
     if (url.pathname === '/account-rename') return handleRename(request, env);
+    if (url.pathname === '/account-claim') return handleClaim(request, env);
     return env.ASSETS.fetch(request);
   }
 };
@@ -148,6 +149,57 @@ async function handleRename(request, env) {
     }
     await patchReviewsUsername(env, userId, newName);
     return json({ ok: true, username: newName });
+  } catch (e) {
+    return json({ error: String(e.message || e) }, 500);
+  }
+}
+
+// перенос на существующий аккаунт: пользователь застрял в авто-аккаунте (вошёл
+// через Telegram до привязки). По логину+паролю старого аккаунта переносим на
+// него Telegram-привязку и обзоры авто-аккаунта, удаляем авто-аккаунт, логиним в старый.
+async function handleClaim(request, env) {
+  if (request.method !== 'POST') return json({ error: 'method' }, 405);
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE) return json({ error: 'server_not_configured' }, 500);
+  let body; try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+  if (!body.accessToken) return json({ error: 'no_session' }, 401);
+  const curId = await userIdFromToken(env, body.accessToken);
+  if (!curId) return json({ error: 'invalid_session' }, 401);
+  const slug = ruSlug(body.loginName || '');
+  const password = String(body.password || '');
+  if (slug.length < 2 || !password) return json({ error: 'bad_credentials' }, 400);
+  const email = slug + LOGIN_DOMAIN;
+  try {
+    // проверяем пароль старого аккаунта
+    const tr = await fetch(`${env.SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+      method: 'POST', headers: { apikey: env.SUPABASE_SERVICE_ROLE, 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    const td = await tr.json().catch(() => ({}));
+    if (!tr.ok || !td.user) return json({ error: 'bad_credentials' }, 401);
+    const mainId = td.user.id;
+    const mainName = (td.user.user_metadata && td.user.user_metadata.username) || slug;
+    if (mainId !== curId) {
+      // Telegram-привязки авто-аккаунта → на старый
+      const lr = await fetch(`${env.SUPABASE_URL}/rest/v1/tg_links?user_id=eq.${curId}&select=telegram_id`, { headers: sbHeaders(env) });
+      const links = await lr.json().catch(() => []);
+      for (const l of (Array.isArray(links) ? links : [])) {
+        await fetch(`${env.SUPABASE_URL}/rest/v1/tg_links?telegram_id=eq.${l.telegram_id}`, {
+          method: 'PATCH', headers: { ...sbHeaders(env), Prefer: 'return=minimal' }, body: JSON.stringify({ user_id: mainId })
+        });
+      }
+      // обзоры авто-аккаунта (если были) → на старый
+      await fetch(`${env.SUPABASE_URL}/rest/v1/reviews?user_id=eq.${curId}`, {
+        method: 'PATCH', headers: { ...sbHeaders(env), Prefer: 'return=minimal' }, body: JSON.stringify({ user_id: mainId, username: mainName })
+      });
+      // удаляем осиротевший авто-аккаунт (только если это телеграм-почта)
+      const cu = await adminGetUser(env, curId);
+      if (cu && /@telegram\./.test(cu.email || '')) {
+        await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users/${curId}`, { method: 'DELETE', headers: sbHeaders(env) });
+      }
+    }
+    const token_hash = await magicToken(env, email);
+    if (!token_hash) return json({ error: 'no_token' }, 500);
+    return json({ ok: true, email, token_hash, username: mainName });
   } catch (e) {
     return json({ error: String(e.message || e) }, 500);
   }

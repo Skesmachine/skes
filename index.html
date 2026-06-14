@@ -1077,6 +1077,10 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.25)}
 .profile-tg .tg-status i,.profile-tg .btn i{font-size:15px;color:#2aabee}
 .acct-tg{margin-bottom:8px}
 .tg-hint{font-size:11.5px;color:var(--text3);margin-top:5px;max-width:340px;line-height:1.4}
+.acct-claim{max-width:340px;margin:10px 0;padding:12px;border:2px solid var(--ink);border-radius:12px;background:color-mix(in srgb,#ffd54a 16%,var(--s1))}
+.acct-claim-ttl{font-weight:700;font-size:13px;color:var(--ink);display:flex;align-items:center;gap:6px}
+.acct-claim-ttl i{color:#d98a12}
+.acct-claim .text-input{width:100%}
 .acct-more{margin-top:2px;font-size:13px}
 .acct-more summary{cursor:pointer;color:var(--text2);font-weight:600;display:inline-flex;align-items:center;gap:6px;list-style:none;padding:2px 0}
 .acct-more summary::-webkit-details-marker{display:none}
@@ -2779,8 +2783,20 @@ async function renderProfileTg(){
     tgRow=`<span class="tg-status muted"><i class="ti ti-brand-telegram"></i> Привязать Telegram можно из Mini App</span>
       <div class="tg-hint">Тогда при забытом пароле войдёшь через Telegram и поставишь новый.</div>`;
   }
+  const isTgAuto=/@telegram\./.test((currentUser&&currentUser.email)||'');
+  const claimBlock = isTgAuto ? `
+    <div class="acct-claim">
+      <div class="acct-claim-ttl"><i class="ti ti-alert-triangle"></i> Обзоры на старом аккаунте?</div>
+      <div class="tg-hint" style="margin:4px 0 8px">Вход через Telegram создал новый аккаунт. Введи логин и пароль старого — перенесём обзоры сюда и привяжем Telegram к нему.</div>
+      <label class="acct-lab">Логин старого аккаунта</label>
+      <input class="text-input" id="claim-login" placeholder="старый логин" autocomplete="off">
+      <label class="acct-lab">Пароль</label>
+      <input class="text-input" id="claim-pass" type="password" placeholder="пароль" autocomplete="off">
+      <button class="btn btn-sm btn-primary" style="margin-top:8px" onclick="claimAccount()"><i class="ti ti-transfer-in"></i> Перенести обзоры сюда</button>
+    </div>` : '';
   box.innerHTML=`
     <div class="acct-tg">${tgRow}</div>
+    ${claimBlock}
     <details class="acct-more">
       <summary><i class="ti ti-settings"></i> Настройки аккаунта</summary>
       <label class="acct-lab">Имя профиля (можно по-русски)</label>
@@ -2794,6 +2810,24 @@ async function renderProfileTg(){
         <button class="btn btn-sm" onclick="changePassword()">Сменить</button>
       </div>
     </details>`;
+}
+
+async function claimAccount(){
+  const v=(document.getElementById('claim-login').value||'').toLowerCase().trim();
+  const p=document.getElementById('claim-pass').value||'';
+  if(!v||!p){ showToast('Введите логин и пароль старого аккаунта'); return; }
+  try{
+    const { data:{ session } }=await sb.auth.getSession();
+    const d=await apiPost('/account-claim',{ accessToken:session.access_token, loginName:v, password:p });
+    const { error }=await sb.auth.verifyOtp({ token_hash:d.token_hash, type:'magiclink' });
+    if(error) throw error;
+    const { data:{ user } }=await sb.auth.getUser(); if(user) currentUser=user;
+    refreshAuthUI();
+    showToast('Готово! Вошли в @'+d.username+', обзоры на месте');
+    route('profile', d.username);
+  }catch(e){
+    showToast(/bad_credentials/.test(e.message)?'Неверный логин или пароль старого аккаунта':'Не удалось перенести: '+tgErr(e.message));
+  }
 }
 
 async function renameAccount(){
