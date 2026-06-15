@@ -369,7 +369,9 @@ window.__can3dReady=true;
   --parch-top:#ecdcb4; --parch-bot:#cdb07a;   /* пергамент карточных плашек */
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html{scroll-behavior:smooth;overflow-x:clip;overscroll-behavior-y:none} /* clip не ломает sticky; overscroll-none гасит pull-to-refresh, из-за которого страница перезагружалась */
+html{scroll-behavior:smooth;overflow-x:clip;overscroll-behavior-y:none;-webkit-tap-highlight-color:transparent} /* clip не ломает sticky; overscroll-none гасит pull-to-refresh; tap-highlight убирает синюю вспышку на тапе */
+/* мгновенный отклик на тап (без 300мс-задержки двойного тапа) у кликабельных */
+button,.btn,.rcard,.nav-tab,.seg button,.bnav-item,.csticker,.like-btn,.tl-item,.brand-pill,a,label,summary{touch-action:manipulation}
 body{background:var(--bg);color:var(--text);font-family:'Rubik',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;padding-bottom:var(--bottomnav-h)}
 body::before{ /* комикс-фон: тёплые цветные пятна, медленно дышат */
   content:'';position:fixed;inset:-12%;z-index:-1;pointer-events:none;
@@ -757,7 +759,7 @@ nav::after{ /* естественный обрыв бумаги: кремовы�
 /* 3D-сцена на наведении: поверх фото, клики пропускает сквозь себя */
 .rcard-3d{position:absolute;inset:-4% 0;z-index:3;display:none;pointer-events:none}
 .rcard-3d.active{display:block;animation:fade3d 0.3s ease}
-.rcard-3d canvas{display:block;width:100%!important;height:100%!important}
+.rcard-3d canvas{display:block;width:100%!important;height:100%!important;backface-visibility:hidden}
 
 /* инфо-зона: высеченная пергаментная табличка (HS-стиль) с тёмным текстом;
    имя — каменная табличка-плашка, наплывает на нижний край ниши */
@@ -945,7 +947,7 @@ nav::after{ /* естественный обрыв бумаги: кремовы�
 .expand-photo .can3d-stage{filter:drop-shadow(0 0 26px color-mix(in srgb, var(--tc) 60%, transparent))}
 .rcard-art:has(.rcard-3d.active) img.can-snap{opacity:0}
 .can3d-stage:active{cursor:grabbing}
-.can3d-stage canvas{display:block;width:100%!important;height:100%!important}
+.can3d-stage canvas{display:block;width:100%!important;height:100%!important;backface-visibility:hidden}
 .can3d-stage.loading::after{content:'';position:absolute;top:50%;left:50%;width:34px;height:34px;margin:-17px 0 0 -17px;border:3px solid var(--border2);border-top-color:var(--acc2);border-radius:50%;animation:spin 0.8s linear infinite}
 .can3d-stage.failed::after{content:'Не удалось загрузить 3D';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:12px;color:var(--text2)}
 .expand-close{position:absolute;top:12px;right:12px;width:36px;height:36px;border-radius:50% 42% 50% 45%;background:var(--s1);border:2.5px solid var(--ink);box-shadow:2.5px 2.5px 0 var(--ink);color:var(--ink);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;transition:transform 0.12s,box-shadow 0.12s,background 0.12s}
@@ -1754,6 +1756,10 @@ function route(page, param){
   if(page==='create') initCreate();
   if(page==='profile') loadProfile(param);
   if(page==='auth') initAuth();
+  // в Telegram: пока пишут обзор — подтверждать случайный свайп-выход, иначе нет
+  if(tgIsMiniApp() && TG.enableClosingConfirmation){
+    if(page==='create') TG.enableClosingConfirmation(); else TG.disableClosingConfirmation();
+  }
 }
 window.addEventListener('hashchange', routeFromHash);
 function routeFromHash(){
