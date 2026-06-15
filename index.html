@@ -371,7 +371,7 @@ window.__can3dReady=true;
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth;overflow-x:clip;overscroll-behavior-y:none;-webkit-tap-highlight-color:transparent} /* clip не ломает sticky; overscroll-none гасит pull-to-refresh; tap-highlight убирает синюю вспышку на тапе */
 /* мгновенный отклик на тап (без 300мс-задержки двойного тапа) у кликабельных */
-button,.btn,.rcard,.nav-tab,.seg button,.bnav-item,.csticker,.like-btn,.tl-item,.brand-pill,a,label,summary{touch-action:manipulation}
+button,.btn,.rcard,.nav-tab,.seg button,.bnav-item,.csticker,.like-btn,.tl-card,.brand-pill,a,label,summary{touch-action:manipulation}
 body{background:var(--bg);color:var(--text);font-family:'Rubik',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;padding-bottom:var(--bottomnav-h)}
 body::before{ /* комикс-фон: тёплые цветные пятна, медленно дышат */
   content:'';position:fixed;inset:-12%;z-index:-1;pointer-events:none;
@@ -405,8 +405,8 @@ body::after{ /* комикс-каракули: молнии, искры, лин�
 /* пиксельный шрифт игровых автоматов — заголовки страниц, вкладки, очки,
    счётчики, стикеры: всё «табло аркады» */
 .feed-title,.feed-sub,.nav-tab,.seg button,.bnav-item,.csticker,.rcard-letter,
-.rcard-score,.expand-score,.tl-label.tl-letter,.tier-badge,.like-btn,
-.tl-item-marks,.tl-item-score,.drev-score,.drev-likes,.profile-stats,.stat-mini-val,
+.rcard-score,.expand-score,.tier-badge,.like-btn,
+.drev-score,.drev-likes,.profile-stats,.stat-mini-val,
 .tl-score,.tl-head-letter{
   font-family:'Press Start 2P','Unbounded',monospace;
 }
@@ -998,66 +998,54 @@ nav::after{ /* естественный обрыв бумаги: кремовы�
 /* ─── TIERLIST ────────────────────────────────────────────── */
 .tl-wrap{max-width:1100px;margin:0 auto;padding:0 1.5rem 3rem}
 @media(max-width:420px){.tl-wrap{padding:0 0.75rem 3rem}}
-.tl-row{display:flex;background:var(--s1);border:3px solid var(--ink);border-radius:var(--radius);overflow:hidden;margin-bottom:14px;box-shadow:5px 5px 0 rgba(26,20,14,0.75)}
-.tl-label{width:108px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-align:center;font-weight:700;font-size:13px;padding:12px 8px;letter-spacing:0.03em}
-.tl-label small{font-weight:400;font-size:10px;opacity:0.75}
-@media(max-width:480px){.tl-label{width:78px;font-size:11px}}
-.tl-items{flex:1;display:flex;flex-wrap:wrap;gap:10px;padding:10px;min-height:96px;align-items:flex-start;align-content:flex-start}
-.tl-empty{color:var(--text3);font-size:12px;align-self:center;padding-left:6px}
-.tl-item{width:76px;cursor:pointer;text-align:center;transition:transform 0.2s}
-.tl-item:hover{transform:translateY(-3px) scale(1.05)}
-.tl-item-photo{position:relative;width:76px;height:76px;border-radius:10px;background:var(--s3);overflow:hidden;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);transition:border-color 0.2s,box-shadow 0.2s}
-.tl-item:hover .tl-item-photo{border-color:color-mix(in srgb, var(--tc,#7a7972) 80%, transparent);box-shadow:0 0 18px color-mix(in srgb, var(--tc,#7a7972) 30%, transparent)}
-.tl-item-photo img{width:100%;height:100%;object-fit:cover}
-.tl-item-photo i{font-size:26px;color:var(--text3)}
-.tl-item-marks{position:absolute;bottom:3px;right:3px;background:rgba(20,16,11,0.82);backdrop-filter:blur(6px);border-radius:6px;padding:3px 6px;font-size:8px;font-weight:400;color:#fff6e3;display:flex;align-items:center;gap:3px}
-.tl-item-marks i{font-size:9px;color:#ff6b95}
-.tl-item-score{position:absolute;top:3px;left:3px;background:rgba(20,16,11,0.82);backdrop-filter:blur(6px);border-radius:6px;padding:3px 6px;font-size:7.5px;font-weight:400;color:#e8dcc6}
-.tl-label.tl-letter{font-size:26px;font-weight:400;text-shadow:3px 3px 0 rgba(43,33,23,0.28);transform:rotate(-2deg)}
-.tl-label.tl-letter small{font-family:'Rubik','Segoe UI',sans-serif;font-size:10px;font-weight:400;text-shadow:none;transform:none}
-.tl-item-name{font-size:10px;color:var(--text2);margin-top:5px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
 
 /* ─── ТИРЛИСТ v2: тир слева, поле карточек справа ─── */
 .tl-section{display:flex;align-items:stretch;margin-bottom:16px;border:2.5px solid var(--ink);border-radius:14px;box-shadow:4px 4px 0 rgba(26,20,14,0.3);overflow:hidden}
 .tl-head{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;flex-shrink:0;width:62px;border-right:2.5px solid var(--ink)}
 .tl-head .tl-head-letter{font-size:26px}
 .tl-head small{font-weight:400;font-size:11px;opacity:0.85}
-.tl-field{flex:1;min-width:0;display:flex;flex-direction:column;gap:9px;padding:11px;background:#fffaf0}
-.tl-card{display:flex;align-items:center;gap:13px;padding:9px 13px;
+/* профильный тирлист: длинные названия тиров («Легендарная хуйня») — колонка пошире, текст помельче */
+.tl-head.tl-head--name{width:118px;padding:10px 9px}
+.tl-head.tl-head--name .tl-head-letter{font-size:14px;font-weight:700;line-height:1.16;text-align:center}
+.tl-field{flex:1;min-width:0;display:flex;flex-wrap:wrap;align-content:flex-start;gap:10px;padding:11px;background:#fffaf0}
+/* маленькая квадратная карточка — много помещается в поле, переносятся по строкам */
+.tl-card{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;width:124px;padding:8px 8px 9px;
   background:
     var(--stone-cobble),
     linear-gradient(180deg, color-mix(in srgb,var(--tc) 9%, #fffaf0), color-mix(in srgb,var(--tc) 17%, #f1e4c9));
   background-size:80% auto, auto;background-blend-mode:overlay,normal;image-rendering:pixelated;
-  border:2.5px solid var(--ink);border-radius:11px;
+  border:2.5px solid var(--ink);border-radius:12px;
   box-shadow:2px 2px 0 rgba(26,20,14,0.38);cursor:pointer;contain:layout;
   transition:transform 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out)}
 @media (hover:hover) and (pointer:fine){
-  .tl-card:hover{transform:translateY(-2px) scale(1.012);box-shadow:5px 7px 0 rgba(26,20,14,0.42)}
+  .tl-card:hover{transform:translateY(-3px) scale(1.03);box-shadow:4px 7px 0 rgba(26,20,14,0.42);z-index:2}
 }
-.tl-card.touch-3d{transform:scale(1.02);box-shadow:5px 7px 0 rgba(26,20,14,0.42)}
-.tl-can{position:relative;width:74px;height:74px;flex-shrink:0;border-radius:9px;overflow:hidden;
+.tl-card.touch-3d{transform:scale(1.04);box-shadow:4px 7px 0 rgba(26,20,14,0.42);z-index:2}
+.tl-can{position:relative;width:100px;height:100px;flex-shrink:0;border-radius:9px;overflow:hidden;
   border:2px solid var(--ink);image-rendering:auto;
   background:radial-gradient(circle at 50% 32%, color-mix(in srgb,var(--tc) 26%, #2a2018) 0 55%, #18110a);
   box-shadow:inset 0 3px 9px rgba(0,0,0,0.55);
   display:flex;align-items:center;justify-content:center}
-.tl-can .can-snap{position:relative;width:84%;height:92%;object-fit:contain;filter:drop-shadow(0 3px 4px rgba(0,0,0,0.45));transition:opacity 0.28s ease;pointer-events:none}
+.tl-can .can-snap{position:relative;width:88%;height:94%;object-fit:contain;filter:drop-shadow(0 3px 4px rgba(0,0,0,0.45));transition:opacity 0.28s ease;pointer-events:none}
 .tl-can:has(.rcard-3d.active) .can-snap{opacity:0}
 .tl-can .snap-wait{position:absolute;z-index:2;width:20px;height:20px;border:3px solid var(--border2);border-top-color:var(--acc2);border-radius:50%;animation:spin 0.8s linear infinite}
-.tl-can>i.ti-can{font-size:30px}
-.tl-info{flex:1;min-width:0}
-.tl-cname{font-family:'Unbounded','Segoe UI',sans-serif;font-weight:700;font-size:13.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tl-stats{display:flex;gap:15px;align-items:center;margin-top:7px;flex-wrap:wrap}
-.tl-stat{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:600;color:var(--text2)}
-.tl-stat i{font-size:15px}
+.tl-can>i.ti-can{font-size:38px}
+.tl-info{width:100%;min-width:0}
+.tl-cname{font-family:'Unbounded','Segoe UI',sans-serif;font-weight:700;font-size:11.5px;line-height:1.2;color:var(--ink);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;min-height:2.4em}
+.tl-stats{display:flex;justify-content:center;gap:8px;align-items:center;margin-top:4px;flex-wrap:wrap}
+.tl-stat{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:600;color:var(--text2)}
+.tl-stat i{font-size:13px}
 .tl-stat.tl-likes i{color:#ff6b95}
 .tl-stat.tl-revs i{color:var(--text3)}
-.tl-score{font-family:'Press Start 2P','Unbounded',monospace;font-size:14px;color:var(--tc)}
-.tl-score i{font-size:15px;color:var(--tc);filter:drop-shadow(1px 1px 0 rgba(26,20,14,0.35))}
-.tl-empty{color:var(--text3);font-size:12px;padding:2px 4px 6px}
+.tl-score{font-family:'Press Start 2P','Unbounded',monospace;font-size:12px;color:var(--tc)}
+.tl-score i{font-size:13px;color:var(--tc);filter:drop-shadow(1px 1px 0 rgba(26,20,14,0.35))}
+.tl-empty{color:var(--text3);font-size:12px;padding:6px 4px}
 @media(max-width:480px){
-  .tl-can{width:64px;height:64px}.tl-cname{font-size:12.5px}.tl-stats{gap:11px}
-  .tl-stat{font-size:11.5px}.tl-score{font-size:12px}.tl-card{gap:11px;padding:8px 11px}
-  .tl-head{width:52px}.tl-head .tl-head-letter{font-size:22px}.tl-field{padding:9px;gap:8px}
+  .tl-card{width:104px;padding:7px 6px 8px}.tl-can{width:84px;height:84px}
+  .tl-cname{font-size:11px}.tl-stats{gap:6px}.tl-stat{font-size:10.5px}.tl-score{font-size:11px}
+  .tl-head{width:50px}.tl-head .tl-head-letter{font-size:22px}.tl-field{padding:9px;gap:8px}
+  .tl-head.tl-head--name{width:88px;padding:8px 6px}.tl-head.tl-head--name .tl-head-letter{font-size:12px}
 }
 
 /* CREATE PAGE */
@@ -1222,13 +1210,6 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
   .expand-stats .stat-mini-val{font-size:9.5px}
   .expand-desc-text{font-size:15.5px;line-height:1.7}
   .expand-desc-label{font-size:12px}
-  /* tierlist: larger tiles and captions */
-  .tl-item{width:84px}
-  .tl-item-photo{width:84px;height:84px}
-  .tl-item-name{font-size:11.5px;color:var(--text)}
-  .tl-item-marks{font-size:8.5px;padding:3px 7px}
-  .tl-label{font-size:12px}
-  .tl-label small{font-size:10.5px}
   /* forms */
   .text-input{font-size:16px} /* stops iOS from auto-zooming inputs */
   .slider-name{font-size:14px;width:168px}
@@ -1249,12 +1230,11 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 .drev-score.over10{animation:rainbow-cycle 1.8s linear infinite}
 
 /* ─── МИКРО-ЖИЗНЬ: маленькие приятные движения ────────────── */
-.nav-tab i,.tl-item-photo,.drev-ava,.rcard-letter,.tog i,.bnav-item i{transition:transform 0.22s var(--ease-out)}
+.nav-tab i,.drev-ava,.rcard-letter,.tog i,.bnav-item i{transition:transform 0.22s var(--ease-out)}
 @media (hover:hover) and (pointer:fine){
   .like-btn:hover i{animation:heart-beat 0.55s var(--ease-out)}
   .logo:hover .logo-bolt{animation:bolt-wiggle 0.5s var(--ease-out)}
   .nav-tab:hover i{transform:translateY(-2px) rotate(-8deg)}
-  .tl-item:hover .tl-item-photo{transform:rotate(-2.5deg) scale(1.05)}
   .drev:hover .drev-ava{transform:rotate(-10deg) scale(1.08)}
   .rcard:hover .rcard-letter{transform:translateY(2.5px)}
   .tog:hover i{transform:scale(1.18) rotate(-7deg)}
@@ -2698,23 +2678,34 @@ function renderProfileTierlist(){
     rows[tierIndex(tierByName(tierOfReview(r)))].push(r);
   });
   Object.values(rows).forEach(arr=>arr.sort((a,b)=>reviewScore(b)-reviewScore(a)));
+  // те же каменные карточки, что и в общем тирлисте, но личные обзоры и «хуёвые» названия тиров
   box.innerHTML=TIERS.slice().reverse().map(tier=>{
     const items=rows[tierIndex(tier)];
-    const itemsHTML=items.length
-      ? items.map(r=>`
-        <div class="tl-item" style="--tc:${tier.color}" onclick="openExpand('${r.id}',this)" title="${esc(dispName(r.drink_name))} — ${fmtScore(reviewScore(r))} / 10">
-          <div class="tl-item-photo">
-            ${r.photo_url?`<img src="${esc(r.photo_url)}" alt="${esc(dispName(r.drink_name))}" loading="lazy">`:'<i class="ti ti-can"></i>'}
-            <span class="tl-item-marks">${fmtScore(reviewScore(r))}</span>
+    const cards=items.length ? items.map(r=>{
+      const sc=reviewScore(r);
+      const can = r.photo_url
+        ? `<span class="snap-wait"></span><img class="can-snap" data-can="${esc(r.photo_url)}" alt="${esc(dispName(r.drink_name))}"><div class="rcard-3d"></div>`
+        : '<i class="ti ti-can" aria-hidden="true"></i>';
+      return `<div class="tl-card" style="--tc:${tier.color}" data-photo="${esc(r.photo_url||'')}" onclick="openExpand('${r.id}',this)" title="${esc(dispName(r.drink_name))} — ${fmtScore(sc)} / 10">
+        <div class="tl-can">${can}</div>
+        <div class="tl-info">
+          <div class="tl-cname">${esc(dispName(r.drink_name))}</div>
+          <div class="tl-stats">
+            <span class="tl-stat tl-score"><i class="ti ti-star-filled"></i>${fmtScore(sc)}</span>
+            <span class="tl-stat tl-likes"><i class="ti ti-heart-filled"></i>${r.like_count||0}</span>
           </div>
-          <div class="tl-item-name">${esc(dispName(r.drink_name))}</div>
-        </div>`).join('')
-      : '<span class="tl-empty">Пока пусто</span>';
-    return `<div class="tl-row" style="border-color:color-mix(in srgb, ${tier.color} 45%, #2b2117)">
-      <div class="tl-label" style="background:${tier.bg};color:${tier.color}">${tier.name}<small>${items.length} шт.</small></div>
-      <div class="tl-items">${itemsHTML}</div>
+        </div>
+      </div>`;
+    }).join('') : '<div class="tl-empty">Пока пусто</div>';
+    return `<div class="tl-section">
+      <div class="tl-head tl-head--name" style="background:${tier.bg};color:${tier.color}"><span class="tl-head-letter">${tier.name}</span><small>${items.length} шт.</small></div>
+      <div class="tl-field">${cards}</div>
     </div>`;
   }).join('');
+
+  // банки — снапшоты офскрин-рендерера + 3D на наведении/долгом нажатии (как в общем тирлисте)
+  box.querySelectorAll('.tl-card').forEach(card=>{ const p=card.dataset.photo; if(p){ bindHover3D(card,p); bindTouchPreview(card,p); } });
+  hydrateCanSnaps(box);
 }
 
 // ─── AUTH PAGE ────────────────────────────────────────────────────────
