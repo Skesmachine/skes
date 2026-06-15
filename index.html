@@ -2601,8 +2601,13 @@ async function loadProfile(username){
   const grid=document.getElementById('profile-grid');
   grid.innerHTML='<div class="spinner"></div>';
 
-  const { data:reviews } = await sb.from('reviews').select('*')
-    .eq('username',username).order('created_at',{ascending:false});
+  // на своём профиле показываем и обзоры по user_id — на случай, если имя в
+  // обзорах разошлось с текущим (после переименований/переносов)
+  let rq=sb.from('reviews').select('*');
+  rq = (currentUser && currentUsername()===username)
+    ? rq.or(`username.eq.${username},user_id.eq.${currentUser.id}`)
+    : rq.eq('username',username);
+  const { data:reviews } = await rq.order('created_at',{ascending:false});
   LIKED_SET=await getLikedSet();
   const countMap=await getLikeCounts();
 
@@ -2756,6 +2761,13 @@ async function apiPost(url, body){
   return d;
 }
 async function tgPost(body){ return apiPost(TG_AUTH_URL, body); }
+// свежий access-токен: за время на странице он мог протухнуть, и сервер бы
+// отверг его («нужно войти») — поэтому перед серверными действиями обновляем
+async function freshToken(){
+  let { data:{ session } }=await sb.auth.getSession();
+  if(session){ const r=await sb.auth.refreshSession(); if(!r.error && r.data.session) session=r.data.session; }
+  return session ? session.access_token : null;
+}
 async function tgLoginWithInitData(silent){
   if(!sb){ if(!silent) showToast('Сначала настройте Supabase'); return; }
   try{
@@ -2809,8 +2821,9 @@ async function tgLinkClick(){
   if(!currentUser){ route('auth'); return; }
   if(!tgIsMiniApp()){ showToast('Привязать Telegram можно из Telegram Mini App'); return; }
   try{
-    const { data:{ session } }=await sb.auth.getSession();
-    const d=await tgPost({action:'link', initData:TG.initData, accessToken:session.access_token});
+    const tok=await freshToken();
+    if(!tok){ showToast('Сначала войдите в аккаунт'); return; }
+    const d=await tgPost({action:'link', initData:TG.initData, accessToken:tok});
     showToast('Telegram привязан'+(d.username?': @'+d.username:''));
     renderProfileTg();
   }catch(e){ showToast('Не удалось привязать: '+tgErr(e.message)); }
@@ -2869,8 +2882,9 @@ async function claimAccount(){
   const p=document.getElementById('claim-pass').value||'';
   if(!v||!p){ showToast('Введите логин и пароль старого аккаунта'); return; }
   try{
-    const { data:{ session } }=await sb.auth.getSession();
-    const d=await apiPost('/account-claim',{ accessToken:session.access_token, loginName:v, password:p });
+    const tok=await freshToken();
+    if(!tok){ showToast('Сначала войдите в аккаунт'); return; }
+    const d=await apiPost('/account-claim',{ accessToken:tok, loginName:v, password:p });
     const { error }=await sb.auth.verifyOtp({ token_hash:d.token_hash, type:'magiclink' });
     if(error) throw error;
     const { data:{ user } }=await sb.auth.getUser(); if(user) currentUser=user;
@@ -2888,8 +2902,9 @@ async function renameAccount(){
   if(loginSlug(v).length<2){ showToast('Слишком короткое имя'); return; }
   if(v===currentUsername()){ showToast('Это и так твоё имя'); return; }
   try{
-    const { data:{ session } }=await sb.auth.getSession();
-    const d=await apiPost('/account-rename',{ accessToken:session.access_token, newUsername:v });
+    const tok=await freshToken();
+    if(!tok){ showToast('Сначала войдите в аккаунт'); return; }
+    const d=await apiPost('/account-rename',{ accessToken:tok, newUsername:v });
     const { data:{ user } }=await sb.auth.getUser(); if(user) currentUser=user;
     refreshAuthUI();
     showToast('Имя профиля изменено на @'+d.username);
