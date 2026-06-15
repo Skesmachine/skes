@@ -1017,18 +1017,19 @@ nav::after{ /* естественный обрыв бумаги: кремовы�
 .tl-label.tl-letter small{font-family:'Rubik','Segoe UI',sans-serif;font-size:10px;font-weight:400;text-shadow:none;transform:none}
 .tl-item-name{font-size:10px;color:var(--text2);margin-top:5px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
 
-/* ─── ТИРЛИСТ v2: понятный список напитков, маленькие каменные карточки ─── */
-.tl-section{margin-bottom:20px}
-.tl-head{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;border:2.5px solid var(--ink);border-radius:9px;box-shadow:3px 3px 0 var(--ink);margin-bottom:11px}
-.tl-head .tl-head-letter{font-size:18px}
-.tl-head small{font-weight:400;font-size:12px;opacity:0.85}
-.tl-card{display:flex;align-items:center;gap:13px;padding:9px 13px;margin-bottom:9px;
+/* ─── ТИРЛИСТ v2: тир слева, поле карточек справа ─── */
+.tl-section{display:flex;align-items:stretch;margin-bottom:16px;border:2.5px solid var(--ink);border-radius:14px;box-shadow:4px 4px 0 rgba(26,20,14,0.3);overflow:hidden}
+.tl-head{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;flex-shrink:0;width:62px;border-right:2.5px solid var(--ink)}
+.tl-head .tl-head-letter{font-size:26px}
+.tl-head small{font-weight:400;font-size:11px;opacity:0.85}
+.tl-field{flex:1;min-width:0;display:flex;flex-direction:column;gap:9px;padding:11px;background:#fffaf0}
+.tl-card{display:flex;align-items:center;gap:13px;padding:9px 13px;
   background:
     var(--stone-cobble),
     linear-gradient(180deg, color-mix(in srgb,var(--tc) 9%, #fffaf0), color-mix(in srgb,var(--tc) 17%, #f1e4c9));
   background-size:80% auto, auto;background-blend-mode:overlay,normal;image-rendering:pixelated;
-  border:2.5px solid var(--ink);border-left:7px solid var(--tc);border-radius:12px;
-  box-shadow:3px 3px 0 rgba(26,20,14,0.42);cursor:pointer;contain:layout;
+  border:2.5px solid var(--ink);border-radius:11px;
+  box-shadow:2px 2px 0 rgba(26,20,14,0.38);cursor:pointer;contain:layout;
   transition:transform 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out)}
 @media (hover:hover) and (pointer:fine){
   .tl-card:hover{transform:translateY(-2px) scale(1.012);box-shadow:5px 7px 0 rgba(26,20,14,0.42)}
@@ -1056,6 +1057,7 @@ nav::after{ /* естественный обрыв бумаги: кремовы�
 @media(max-width:480px){
   .tl-can{width:64px;height:64px}.tl-cname{font-size:12.5px}.tl-stats{gap:11px}
   .tl-stat{font-size:11.5px}.tl-score{font-size:12px}.tl-card{gap:11px;padding:8px 11px}
+  .tl-head{width:52px}.tl-head .tl-head-letter{font-size:22px}.tl-field{padding:9px;gap:8px}
 }
 
 /* CREATE PAGE */
@@ -2504,8 +2506,8 @@ async function loadTierlist(){
       </div>`;
     }).join('') : '<div class="tl-empty">пока пусто</div>';
     return `<div class="tl-section">
-      <div class="tl-head" style="background:${row.bg};color:${row.color}"><span class="tl-head-letter">${row.name}</span> <small>${items.length}</small></div>
-      ${cards}
+      <div class="tl-head" style="background:${row.bg};color:${row.color}"><span class="tl-head-letter">${row.name}</span><small>${items.length}</small></div>
+      <div class="tl-field">${cards}</div>
     </div>`;
   }).join('');
 
