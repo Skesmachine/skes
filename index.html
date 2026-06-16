@@ -1394,7 +1394,13 @@ button:focus-visible,.btn:focus-visible,a:focus-visible{outline:3px dashed var(-
 <div class="page" id="page-profile">
   <div class="profile-wrap">
     <div class="profile-header">
-      <div class="avatar" id="profile-avatar">?</div>
+      <div class="avatar-wrap" style="position:relative;flex-shrink:0">
+        <div class="avatar" id="profile-avatar">?</div>
+        <button id="avatar-edit" onclick="document.getElementById('avatar-file').click()" title="Сменить аватар"
+          style="display:none;position:absolute;right:-3px;bottom:-3px;width:26px;height:26px;border-radius:50%;border:2px solid var(--ink);background:#ff8a2a;color:#2b1605;cursor:pointer;align-items:center;justify-content:center;padding:0">
+          <i class="ti ti-camera" style="font-size:13px"></i></button>
+        <input type="file" id="avatar-file" accept="image/*" style="display:none" onchange="uploadAvatar(this.files[0]);this.value=''">
+      </div>
       <div>
         <div class="profile-name" id="profile-username"></div>
         <div class="profile-stats" id="profile-stats"></div>
@@ -1828,6 +1834,42 @@ function statsHTML(v){
 const REVIEW_CACHE={};      // id -> review row (for expand view)
 let LIKED_SET=new Set();    // review ids liked by this fingerprint
 
+// ─── АВАТАРКИ ─────────────────────────────────────────────────────────
+// круглые аватары авторов. Карта user_id -> url (null = искали, нет аватара).
+// храним в таблице profiles (публично читаемой), файл — в bucket drink-photos.
+let AVATARS={};
+async function loadAvatars(ids){
+  const need=[...new Set((ids||[]).filter(Boolean))].filter(id=>!(id in AVATARS));
+  if(!need.length) return;
+  try{
+    const { data }=await sb.from('profiles').select('user_id,avatar_url').in('user_id',need);
+    (data||[]).forEach(p=>{ AVATARS[p.user_id]=p.avatar_url||null; });
+  }catch(_){}
+  need.forEach(id=>{ if(!(id in AVATARS)) AVATARS[id]=null; });
+}
+// инлайн-стиль для круглой заглушки: подставляет фото поверх (круглый кроп — cover)
+function avatarBg(userId){
+  const u=userId&&AVATARS[userId];
+  return u ? ` style="background-image:url('${u}');background-size:cover;background-position:center;color:transparent"` : '';
+}
+async function uploadAvatar(file){
+  if(!currentUser||!file) return;
+  if(!/^image\//.test(file.type||'')){ showToast('Нужна картинка'); return; }
+  showToast('Загружаем аватар…');
+  // уникальное имя файла → только INSERT, без перезаписи (хватает текущих прав storage)
+  const path=`avatars/${currentUser.id}/${Date.now()}.png`;
+  const { error:upErr }=await sb.storage.from('drink-photos').upload(path,file,{contentType:file.type||'image/png'});
+  if(upErr){ showToast('Не загрузилось: '+upErr.message); return; }
+  const { data:pub }=sb.storage.from('drink-photos').getPublicUrl(path);
+  const url=pub.publicUrl;
+  const { error }=await sb.from('profiles').upsert({ user_id:currentUser.id, avatar_url:url });
+  if(error){ showToast('Профиль не сохранился: '+error.message); return; }
+  AVATARS[currentUser.id]=url;
+  const av=document.getElementById('profile-avatar');
+  if(av){ av.style.cssText+=`background-image:url('${url}');background-size:cover;background-position:center`; av.textContent=''; }
+  showToast('Аватарка обновлена');
+}
+
 // коллекционная карта: банка на комикс-взрыве, минимум текста.
 // характеристики и описание живут в развёрнутом обзоре (клик по карте)
 const FRAME_BY_LETTER={D:'#8a8175',C:'#717a52',B:'#687589',A:'#786a86',S:'#9c8350'};
@@ -1846,7 +1888,7 @@ function cardHTML(d){
     : `<span class="like-btn"><i class="ti ti-heart"></i><span>${d.likeCount||0}</span></span>`;
   const descIcon = d.hasDesc ? '<i class="ti ti-message-2 has-desc" title="Есть обзор"></i>' : '';
   const author = d.username
-    ? `<a class="auth" href="#profile/${esc(d.username)}" onclick="event.stopPropagation();route('profile','${esc(d.username)}');return false" title="@${esc(d.username)} · ${d.timeText}">@${esc(d.username)}</a>`
+    ? `<a class="auth" href="#profile/${esc(d.username)}" onclick="event.stopPropagation();route('profile','${esc(d.username)}');return false" title="${esc(d.username)} · ${d.timeText}">${esc(d.username)}</a>`
     : `<span class="auth">${d.timeText}</span>`;
   // единственная наклейка — «НОВИНКА» на свежих обзорах
   let sticks='';
@@ -1869,7 +1911,7 @@ function cardHTML(d){
       <span class="tier-badge" style="background:${tier.bg};color:${tier.color}">${tier.name}</span>
     </div>
     <div class="rcard-foot">
-      <span class="ava">${esc((d.username||'?')[0].toUpperCase())}</span>
+      <span class="ava"${avatarBg(d.user_id)}>${esc((d.username||'?')[0].toUpperCase())}</span>
       ${author}
       ${descIcon}
       ${like}
@@ -1893,7 +1935,7 @@ function renderCard(r){
   div.style.setProperty('--gx',((h%100))+'%');
   div.style.setProperty('--gy',(((h>>3)%100))+'%');
   div.innerHTML=cardHTML({
-    photoSrc:r.photo_url, name:r.drink_name, username:r.username,
+    photoSrc:r.photo_url, name:r.drink_name, username:r.username, user_id:r.user_id,
     timeText:timeAgo(r.created_at), score, tier:tname,
     likeCount:r.like_count, liked:LIKED_SET.has(r.id),
     hasDesc: !!(r.description&&r.description.trim()),
@@ -2045,12 +2087,12 @@ function expandHTML(r){
       </div>
       <div class="expand-meta expand-reveal" style="animation-delay:0.1s">
         <span class="tier-badge" style="background:${tier.bg};color:${tier.color}">${tier.name}</span>
-        <a href="#profile/${esc(r.username)}" onclick="route('profile','${esc(r.username)}');return false">@${esc(r.username)}</a>
+        <a href="#profile/${esc(r.username)}" onclick="route('profile','${esc(r.username)}');return false">${esc(r.username)}</a>
         · <span>${timeAgo(r.created_at)}</span>
       </div>
       <div class="expand-stats expand-reveal" style="animation-delay:0.18s">${statsHTML(r)}</div>
       <div class="expand-desc expand-reveal" style="animation-delay:0.28s">
-        <div class="expand-desc-label"><i class="ti ti-message-2"></i> Описание от @${esc(r.username)}</div>
+        <div class="expand-desc-label"><i class="ti ti-message-2"></i> Описание от ${esc(r.username)}</div>
         ${descBlock}
       </div>
       <div class="expand-footer expand-reveal" style="animation-delay:0.36s">
@@ -2246,6 +2288,7 @@ async function loadFeed(){
   document.getElementById('feed-count').textContent=reviews.length+' '+plural(reviews.length,'обзор','обзора','обзоров');
   reviews.forEach(r=>{ r.like_count=countMap[r.id]||0; });
   feedReviews=reviews;
+  await loadAvatars(reviews.map(r=>r.user_id));
   renderFeed();
 }
 
@@ -2385,6 +2428,7 @@ async function loadTierlist(){
     return;
   }
   LIKED_SET=await getLikedSet();
+  await loadAvatars(reviews.map(r=>r.user_id));   // для аватаров в списке обзоров напитка
   // лайки берём с отпечатками: для рейтинга напитка человек считается один раз,
   // даже если лайкнул несколько обзоров одного и того же энергетика
   const { data:likeRows } = await sb.from('likes').select('review_id,fingerprint');
@@ -2488,9 +2532,9 @@ function openDrinkExpand(key, sourceEl){
   const revList=sorted.map(r=>{
     const rt=tierByName(tierOfReview(r));
     return `<div class="drev" onclick="openExpand('${r.id}')">
-      <div class="drev-ava">${esc((r.username||'?')[0].toUpperCase())}</div>
+      <div class="drev-ava"${avatarBg(r.user_id)}>${esc((r.username||'?')[0].toUpperCase())}</div>
       <div class="drev-info">
-        <div class="drev-user">@${esc(r.username)}</div>
+        <div class="drev-user">${esc(r.username)}</div>
         <div class="drev-meta"><span style="color:${rt.color};font-weight:600">${rt.name}</span> · ${timeAgo(r.created_at)}</div>
       </div>
       <div class="drev-right">
@@ -2586,8 +2630,11 @@ function setProfileView(v){
 
 async function loadProfile(username){
   setHash('profile/'+encodeURIComponent(username));
-  document.getElementById('profile-username').textContent='@'+username;
-  document.getElementById('profile-avatar').textContent=(username[0]||'?').toUpperCase();
+  document.getElementById('profile-username').textContent=username;
+  const avEl=document.getElementById('profile-avatar');
+  avEl.style.backgroundImage=''; avEl.textContent=(username[0]||'?').toUpperCase();
+  const own=!!(currentUser && currentUsername()===username);
+  document.getElementById('avatar-edit').style.display=own?'flex':'none';
   renderProfileTg();
   document.getElementById('profile-stats').textContent='Загружаем...';
   const grid=document.getElementById('profile-grid');
@@ -2605,6 +2652,14 @@ async function loadProfile(username){
 
   profileReviews=reviews||[];
   profileReviews.forEach(r=>{ r.like_count=countMap[r.id]||0; REVIEW_CACHE[r.id]=r; });
+
+  // аватарки авторов карточек + аватар самого профиля
+  const profUid = own ? currentUser.id : (profileReviews[0] && profileReviews[0].user_id);
+  await loadAvatars([profUid, ...profileReviews.map(r=>r.user_id)]);
+  if(profUid && AVATARS[profUid]){
+    avEl.style.cssText+=`background-image:url('${AVATARS[profUid]}');background-size:cover;background-position:center`;
+    avEl.textContent='';
+  }
 
   const total=profileReviews.length;
   const avg=total?(profileReviews.reduce((s,r)=>s+reviewScore(r),0)/total).toFixed(2):'0.00';
