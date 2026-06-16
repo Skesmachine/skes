@@ -1419,7 +1419,8 @@ button:focus-visible,.btn:focus-visible,a:focus-visible{outline:3px dashed var(-
     <div class="auth-sub" id="auth-sub">Войдите, чтобы публиковать обзоры</div>
     <div class="auth-field">
       <label>Имя (можно по-русски)</label>
-      <input type="text" class="text-input" id="auth-username" placeholder="например: Вася или skesmachine" autocomplete="username">
+      <input type="text" class="text-input" id="auth-username" placeholder="например: Вася или skesmachine" autocomplete="username" oninput="authLoginHint()">
+      <div id="auth-login-hint" style="display:none;font-size:12px;color:var(--text2);margin-top:5px"></div>
     </div>
     <div class="auth-field">
       <label>Пароль</label>
@@ -2671,6 +2672,19 @@ function initAuth(){
 }
 function toggleAuthMode(){ authMode=authMode==='login'?'signup':'login'; initAuth(); }
 
+// подсказка про коллизию: показываем, в какой логин превратится кириллица
+function authLoginHint(){
+  const u=document.getElementById('auth-username').value.trim().toLowerCase();
+  const slug=loginSlug(u);
+  const hint=document.getElementById('auth-login-hint');
+  if(!hint) return;
+  if(u && slug!==u){
+    hint.style.display='block';
+    hint.textContent = slug.length>=2 ? `Вход будет по логину «${slug}» (имя переводится в латиницу)`
+                                       : 'Слишком короткое имя для входа — добавьте латиницу или цифры';
+  } else hint.style.display='none';
+}
+
 async function submitAuth(){
   const u=document.getElementById('auth-username').value.trim().toLowerCase();
   const p=document.getElementById('auth-password').value;
@@ -2693,7 +2707,7 @@ async function submitAuth(){
 
   if(res.error){
     let m=res.error.message;
-    if(/already registered/i.test(m)) m='Такой логин уже занят';
+    if(/already registered/i.test(m)) m=slug!==u ? `Логин «${slug}» уже занят (ваше имя переводится в латиницу). Выберите другое имя.` : 'Такой логин уже занят';
     if(/Invalid login/i.test(m)) m='Неверный логин или пароль';
     if(/Email not confirmed/i.test(m)) m='Включите авто-подтверждение почты в Supabase (шаг 4)';
     showToast('Ошибка: '+m); return;

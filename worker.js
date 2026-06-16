@@ -13,7 +13,7 @@
 //   {action:'link',  initData, accessToken}         — привязать Telegram к текущему аккаунту
 // и возвращает {ok, email, token_hash} (клиент делает verifyOtp) либо {ok, linked}.
 
-const TG_MAX_AGE = 86400; // initData/widget не старше суток
+const TG_MAX_AGE = 3600; // initData/widget не старше часа (защита от повторного входа)
 const TG_EMAIL_DOMAIN = 'telegram.skesmachina.app';
 const LOGIN_DOMAIN = '@skesmachina.app'; // логин-почта = slug(имя)@skesmachina.app
 // имя профиля может быть кириллицей; почта входа — ASCII-транслит
@@ -32,6 +32,13 @@ export default {
 
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json' } });
+}
+// глубина обороны: браузерные POST принимаем только со своего origin.
+// у не-браузерных источников Origin нет — их пропускаем (всё равно нужна подпись/токен).
+function originOk(request) {
+  const o = request.headers.get('Origin');
+  if (!o) return true;
+  try { return new URL(o).host === new URL(request.url).host; } catch { return false; }
 }
 const enc = (s) => new TextEncoder().encode(s);
 
@@ -125,9 +132,33 @@ async function patchReviewsUsername(env, userId, username) {
   });
 }
 
+// анти-перебор пароля для /account-claim: после RL_MAX неудач с одного IP —
+// временная блокировка на RL_WINDOW_MIN минут. Счётчик в таблице rl_claim.
+// ponytail: ключ по IP (CF-Connecting-IP), best-effort; хватает против перебора.
+const RL_MAX = 10, RL_WINDOW_MIN = 15;
+async function rlGet(env, ip) {
+  const r = await fetch(`${env.SUPABASE_URL}/rest/v1/rl_claim?ip=eq.${encodeURIComponent(ip)}&select=fails,until`, { headers: sbHeaders(env) });
+  const a = await r.json().catch(() => null);
+  return Array.isArray(a) && a[0] ? a[0] : null;
+}
+function rlBlocked(rl) { return !!(rl && rl.until && new Date(rl.until) > new Date()); }
+async function rlFail(env, ip) {
+  const cur = await rlGet(env, ip);
+  const fails = ((cur && cur.fails) || 0) + 1;
+  const until = fails >= RL_MAX ? new Date(Date.now() + RL_WINDOW_MIN * 60000).toISOString() : null;
+  await fetch(`${env.SUPABASE_URL}/rest/v1/rl_claim`, {
+    method: 'POST', headers: { ...sbHeaders(env), Prefer: 'resolution=merge-duplicates' },
+    body: JSON.stringify({ ip, fails, until })
+  });
+}
+async function rlReset(env, ip) {
+  await fetch(`${env.SUPABASE_URL}/rest/v1/rl_claim?ip=eq.${encodeURIComponent(ip)}`, { method: 'DELETE', headers: sbHeaders(env) });
+}
+
 // смена имени профиля: имя в metadata + логин-почта + во всех обзорах автора
 async function handleRename(request, env) {
   if (request.method !== 'POST') return json({ error: 'method' }, 405);
+  if (!originOk(request)) return json({ error: 'bad_origin' }, 403);
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE) return json({ error: 'server_not_configured' }, 500);
   let body; try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
   const newName = String(body.newUsername || '').toLowerCase().trim();
@@ -159,6 +190,7 @@ async function handleRename(request, env) {
 // него Telegram-привязку и обзоры авто-аккаунта, удаляем авто-аккаунт, логиним в старый.
 async function handleClaim(request, env) {
   if (request.method !== 'POST') return json({ error: 'method' }, 405);
+  if (!originOk(request)) return json({ error: 'bad_origin' }, 403);
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE) return json({ error: 'server_not_configured' }, 500);
   let body; try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
   if (!body.accessToken) return json({ error: 'no_session' }, 401);
@@ -168,6 +200,9 @@ async function handleClaim(request, env) {
   const password = String(body.password || '');
   if (slug.length < 2 || !password) return json({ error: 'bad_credentials' }, 400);
   const email = slug + LOGIN_DOMAIN;
+  // анти-перебор: если с этого IP уже было 10 неудач — временно отказываем
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  if (rlBlocked(await rlGet(env, ip))) return json({ error: 'too_many_attempts' }, 429);
   try {
     // проверяем пароль старого аккаунта
     const tr = await fetch(`${env.SUPABASE_URL}/auth/v1/token?grant_type=password`, {
@@ -175,7 +210,8 @@ async function handleClaim(request, env) {
       body: JSON.stringify({ email, password })
     });
     const td = await tr.json().catch(() => ({}));
-    if (!tr.ok || !td.user) return json({ error: 'bad_credentials' }, 401);
+    if (!tr.ok || !td.user) { await rlFail(env, ip); return json({ error: 'bad_credentials' }, 401); }
+    await rlReset(env, ip);   // верный пароль — сбрасываем счётчик неудач
     const mainId = td.user.id;
     const mainName = (td.user.user_metadata && td.user.user_metadata.username) || slug;
     if (mainId !== curId) {
@@ -209,6 +245,7 @@ async function handleClaim(request, env) {
 
 async function handleTelegramAuth(request, env) {
   if (request.method !== 'POST') return json({ error: 'method' }, 405);
+  if (!originOk(request)) return json({ error: 'bad_origin' }, 403);
   if (!env.BOT_TOKEN || !env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE) return json({ error: 'server_not_configured' }, 500);
   let body; try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
 
