@@ -1399,7 +1399,7 @@ button:focus-visible,.btn:focus-visible,a:focus-visible{outline:3px dashed var(-
         <button id="avatar-edit" onclick="document.getElementById('avatar-file').click()" title="Сменить аватар"
           style="display:none;position:absolute;right:-3px;bottom:-3px;width:26px;height:26px;border-radius:50%;border:2px solid var(--ink);background:#ff8a2a;color:#2b1605;cursor:pointer;align-items:center;justify-content:center;padding:0">
           <i class="ti ti-camera" style="font-size:13px"></i></button>
-        <input type="file" id="avatar-file" accept="image/*" style="display:none" onchange="uploadAvatar(this.files[0]);this.value=''">
+        <input type="file" id="avatar-file" accept="image/*" style="display:none" onchange="openAvatarCrop(this.files[0]);this.value=''">
       </div>
       <div>
         <div class="profile-name" id="profile-username"></div>
@@ -1545,6 +1545,20 @@ insert into admins (user_id)
       <button class="btn" style="flex:1;justify-content:center;min-width:130px" onclick="lassoReset()"><i class="ti ti-eraser"></i> Сбросить точки</button>
       <button class="btn" style="flex:1;justify-content:center;min-width:100px" onclick="cancelCrop()">Отмена</button>
       <button class="btn btn-primary" style="flex:1.2;justify-content:center;min-width:130px" id="lasso-apply" onclick="applyCrop()"><i class="ti ti-scissors"></i> Применить</button>
+    </div>
+  </div>
+</div>
+
+<!-- круглый кроп аватарки -->
+<div class="modal-overlay" id="avatar-crop-modal" style="display:none">
+  <div class="modal" style="max-width:440px">
+    <h2><i class="ti ti-user-circle"></i> Круглая аватарка</h2>
+    <p style="margin-bottom:0.75rem">Двигай круг по фото, ползунком меняй размер. Внутри круга — твоя аватарка.</p>
+    <div class="lasso-wrap"><canvas id="avCropCanvas"></canvas></div>
+    <input type="range" id="avCropSize" min="20" max="100" value="72" style="width:100%;margin:12px 0" oninput="avCropResize()">
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn" style="flex:1;justify-content:center;min-width:100px" onclick="cancelAvatarCrop()">Отмена</button>
+      <button class="btn btn-primary" style="flex:1.2;justify-content:center;min-width:130px" onclick="applyAvatarCrop()"><i class="ti ti-check"></i> Поставить</button>
     </div>
   </div>
 </div>
@@ -3101,7 +3115,8 @@ function openCrop(file){
     img.onload=()=>{
       lassoImg=img; lassoPts=[];
       const cv=document.getElementById('lassoCanvas');
-      const maxW=Math.min(540, innerWidth-90), maxH=Math.round(innerHeight*0.5);
+      // больше места под фото → точки не липнут друг к другу, легче ставить
+      const maxW=Math.min(560, innerWidth-32), maxH=Math.round(innerHeight*0.64);
       lassoScale=Math.min(maxW/img.width, maxH/img.height, 1);
       cv.width=Math.max(1,Math.round(img.width*lassoScale));
       cv.height=Math.max(1,Math.round(img.height*lassoScale));
@@ -3141,9 +3156,9 @@ function drawLasso(){
     ctx.setLineDash([7,5]); ctx.stroke(); ctx.setLineDash([]);
     // неоновые точки с чёрной обводкой; первая — золотая
     lassoPts.forEach((p,i)=>{
-      ctx.beginPath(); ctx.arc(p.x,p.y,i===0?7:6,0,Math.PI*2);
+      ctx.beginPath(); ctx.arc(p.x,p.y,i===0?5:4,0,Math.PI*2);
       ctx.fillStyle=i===0?'#ffd54a':'#39ff14'; ctx.fill();
-      ctx.lineWidth=3; ctx.strokeStyle='#1a140e'; ctx.stroke();
+      ctx.lineWidth=2; ctx.strokeStyle='#1a140e'; ctx.stroke();
     });
   }
   const btn=document.getElementById('lasso-apply');
@@ -3192,7 +3207,10 @@ lassoCv.addEventListener('pointerdown',e=>{
   e.preventDefault();
   if(!lassoImg) return;
   const p=lassoCanvasPos(e);
-  const grabR=14/Math.min(1,lassoScale||1);          // зона захвата с учётом масштаба
+  // зона захвата = ~18px пальца, пересчитанные в пиксели канваса (а не делить на
+  // масштаб — иначе для уменьшенных фото зона огромная и новые точки не ставятся)
+  const rect=lassoCv.getBoundingClientRect();
+  const grabR=18*(lassoCv.width/Math.max(1,rect.width));
   const hit=lassoPts.findIndex(q=>Math.hypot(q.x-p.x,q.y-p.y)<=grabR);
   if(hit>=0){
     lassoDrag=hit;
@@ -3209,6 +3227,75 @@ lassoCv.addEventListener('pointermove',e=>{
 });
 lassoCv.addEventListener('pointerup',()=>{ lassoDrag=-1; });
 lassoCv.addEventListener('pointercancel',()=>{ lassoDrag=-1; });
+
+// ─── КРУГЛЫЙ КРОП АВАТАРКИ ────────────────────────────────────────────
+// двигаешь круг по фото, ползунок меняет радиус; вырезаем круглую область
+let avImg=null, avScale=1, avCx=0, avCy=0, avR=0, avDrag=false;
+function openAvatarCrop(file){
+  if(!file||!/^image\//.test(file.type||'')){ showToast('Нужна картинка'); return; }
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    const img=new Image();
+    img.onload=()=>{
+      avImg=img;
+      const cv=document.getElementById('avCropCanvas');
+      const maxW=Math.min(400, innerWidth-32), maxH=Math.round(innerHeight*0.5);
+      avScale=Math.min(maxW/img.width, maxH/img.height, 1);
+      cv.width=Math.max(1,Math.round(img.width*avScale));
+      cv.height=Math.max(1,Math.round(img.height*avScale));
+      avCx=cv.width/2; avCy=cv.height/2;
+      avCropResize();
+      document.getElementById('avatar-crop-modal').style.display='flex';
+    };
+    img.src=ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+function avCropResize(){
+  const cv=document.getElementById('avCropCanvas');
+  const pct=(+document.getElementById('avCropSize').value)/100;
+  avR=Math.min(cv.width,cv.height)/2*pct;
+  avCx=Math.max(avR,Math.min(cv.width-avR,avCx));   // держим круг в кадре
+  avCy=Math.max(avR,Math.min(cv.height-avR,avCy));
+  drawAvCrop();
+}
+function drawAvCrop(){
+  const cv=document.getElementById('avCropCanvas'), ctx=cv.getContext('2d');
+  if(!avImg) return;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.drawImage(avImg,0,0,cv.width,cv.height);
+  ctx.save();
+  ctx.fillStyle='rgba(10,8,5,0.55)'; ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.globalCompositeOperation='destination-out';
+  ctx.beginPath(); ctx.arc(avCx,avCy,avR,0,Math.PI*2); ctx.fill();   // вырезаем окно круга
+  ctx.restore();
+  ctx.beginPath(); ctx.arc(avCx,avCy,avR,0,Math.PI*2);
+  ctx.lineWidth=2.5; ctx.strokeStyle='#39ff14'; ctx.setLineDash([7,5]); ctx.stroke(); ctx.setLineDash([]);
+}
+function avPos(e){ const cv=document.getElementById('avCropCanvas'), r=cv.getBoundingClientRect();
+  return { x:(e.clientX-r.left)*cv.width/r.width, y:(e.clientY-r.top)*cv.height/r.height }; }
+function cancelAvatarCrop(){ document.getElementById('avatar-crop-modal').style.display='none'; avImg=null; }
+function applyAvatarCrop(){
+  if(!avImg) return;
+  const k=1/avScale, cx=avCx*k, cy=avCy*k, r=avR*k;   // канвас → оригинал
+  const size=Math.min(512, Math.round(r*2));          // не раздуваем файл
+  const out=document.createElement('canvas'); out.width=size; out.height=size;
+  const ctx=out.getContext('2d');
+  ctx.beginPath(); ctx.arc(size/2,size/2,size/2,0,Math.PI*2); ctx.clip();  // круглый вырез
+  ctx.drawImage(avImg, cx-r, cy-r, r*2, r*2, 0, 0, size, size);
+  document.getElementById('avatar-crop-modal').style.display='none';
+  out.toBlob(blob=>{ if(blob) uploadAvatar(new File([blob],'avatar.png',{type:'image/png'})); },'image/png');
+  avImg=null;
+}
+(()=>{
+  const avCv=document.getElementById('avCropCanvas');
+  if(!avCv) return;
+  const move=e=>{ if(!avDrag||!avImg) return; const p=avPos(e); avCx=p.x; avCy=p.y; avCropResize(); };
+  avCv.addEventListener('pointerdown',e=>{ e.preventDefault(); if(!avImg) return; avDrag=true; avCv.setPointerCapture(e.pointerId); const p=avPos(e); avCx=p.x; avCy=p.y; avCropResize(); });
+  avCv.addEventListener('pointermove',move);
+  avCv.addEventListener('pointerup',()=>{ avDrag=false; });
+  avCv.addEventListener('pointercancel',()=>{ avDrag=false; });
+})();
 
 // ─── PHOTO (после кропа) ──────────────────────────────────────────────
 // в базу уходит ОРИГИНАЛЬНОЕ кропнутое фото — его можно посмотреть в обзоре.
