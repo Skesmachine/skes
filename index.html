@@ -997,12 +997,14 @@ nav::after{ /* естественный обрыв бумаги: кремовы�
 .drev-ava{width:30px;height:30px;border-radius:50%;background:var(--s3);border:1.5px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--text2);flex-shrink:0}
 .drev-info{min-width:0}
 /* мини-банка топ-энергетика автора слева от аватарки; тап — дрожит */
-.mini-can{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;flex-shrink:0;transform:rotate(-9deg);cursor:pointer}
-.mini-can img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 1px 1.5px rgba(0,0,0,0.45));pointer-events:none;image-rendering:auto}
+/* банка налезает на аватарку слева и стоит поверх неё */
+.mini-can{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;flex-shrink:0;position:relative;z-index:2;margin-right:-11px;transform:rotate(-9deg);cursor:pointer}
+.mini-can img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 1px 1.5px rgba(0,0,0,0.5));pointer-events:none;image-rendering:auto}
 .mini-can.shake{animation:can-shake 0.55s ease}
 @keyframes can-shake{0%,100%{transform:rotate(-9deg)}15%{transform:rotate(-21deg)}32%{transform:rotate(5deg)}48%{transform:rotate(-16deg)}64%{transform:rotate(2deg)}82%{transform:rotate(-12deg)}}
-.drev .mini-can{width:30px;height:30px}
-.profile-header .mini-can{width:50px;height:50px;transform:rotate(-9deg)}
+.drev .mini-can{width:32px;height:32px;margin-right:-12px}
+/* в профиле — абсолютом на нижне-левый угол аватарки, чуть поверх */
+.profile-header .mini-can{position:absolute;left:-22px;bottom:-2px;width:50px;height:50px;z-index:3;margin:0;transform:rotate(-9deg)}
 .drev-user{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .drev-meta{font-size:11.5px;color:var(--text2)}
 .drev-right{margin-left:auto;text-align:right;flex-shrink:0}
@@ -1404,8 +1406,8 @@ button:focus-visible,.btn:focus-visible,a:focus-visible{outline:3px dashed var(-
 <div class="page" id="page-profile">
   <div class="profile-wrap">
     <div class="profile-header">
-      <span class="mini-can" id="profile-mini-can" onclick="shakeCan(this)" title="Топ-энергетик" style="display:none"></span>
       <div class="avatar-wrap" style="position:relative;flex-shrink:0">
+        <span class="mini-can" id="profile-mini-can" onclick="shakeCan(this)" title="Топ-энергетик" style="display:none"></span>
         <div class="avatar" id="profile-avatar">?</div>
         <button id="avatar-edit" onclick="document.getElementById('avatar-file').click()" title="Сменить аватар"
           style="display:none;position:absolute;right:-3px;bottom:-3px;width:26px;height:26px;border-radius:50%;border:2px solid var(--ink);background:#ff8a2a;color:#2b1605;cursor:pointer;align-items:center;justify-content:center;padding:0">
