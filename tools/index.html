@@ -1,0 +1,764 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Вырезатель — pixel-perfect выделение объектов и SFX</title>
+<style>
+  :root{
+    --bg:#0e0f13; --panel:#171a21; --panel2:#1f242e; --line:#2b313d;
+    --ink:#e8ecf3; --muted:#8b93a4; --accent:#ff5a36; --accent2:#36c2ff;
+    --ok:#46d27e; --danger:#ff4d6d;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--ink); font:13px/1.4 ui-sans-serif,system-ui,"Segoe UI",Roboto,Arial,sans-serif;
+    display:flex; flex-direction:column; overflow:hidden; user-select:none; -webkit-user-select:none;
+  }
+  header{
+    display:flex; align-items:center; gap:10px; padding:8px 12px; background:var(--panel);
+    border-bottom:1px solid var(--line); flex:0 0 auto; flex-wrap:wrap;
+  }
+  header .logo{font-weight:800; letter-spacing:.3px; font-size:14px}
+  header .logo b{color:var(--accent)}
+  .spacer{flex:1}
+  .seg{display:flex; background:var(--panel2); border:1px solid var(--line); border-radius:9px; overflow:hidden}
+  .seg button{
+    background:transparent; color:var(--muted); border:0; padding:7px 11px; cursor:pointer; font-weight:600; font-size:12px;
+    border-right:1px solid var(--line);
+  }
+  .seg button:last-child{border-right:0}
+  .seg button.active{background:var(--accent); color:#fff}
+  .btn{
+    background:var(--panel2); color:var(--ink); border:1px solid var(--line); border-radius:8px;
+    padding:7px 11px; cursor:pointer; font-weight:600; font-size:12px;
+  }
+  .btn:hover{border-color:var(--accent2)}
+  .btn:disabled{opacity:.4; cursor:not-allowed}
+  .btn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+  .btn.ghost{background:transparent}
+  main{flex:1; display:flex; min-height:0}
+  aside{
+    width:268px; flex:0 0 auto; background:var(--panel); border-right:1px solid var(--line);
+    overflow-y:auto; padding:12px;
+  }
+  .grp{margin-bottom:16px}
+  .grp h3{margin:0 0 8px; font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--muted)}
+  .row{display:flex; align-items:center; gap:8px; margin:8px 0}
+  .row label{flex:0 0 88px; color:var(--muted); font-size:12px}
+  .row input[type=range]{flex:1; accent-color:var(--accent)}
+  .row .val{flex:0 0 38px; text-align:right; font-variant-numeric:tabular-nums; color:var(--ink)}
+  .chk{display:flex; align-items:center; gap:8px; margin:8px 0; cursor:pointer}
+  .chk input{accent-color:var(--accent); width:16px; height:16px}
+  .hint{color:var(--muted); font-size:11px; margin:6px 0 0; line-height:1.45}
+  .swatch{width:22px;height:22px;border-radius:5px;border:1px solid var(--line);cursor:pointer}
+  .stage{flex:1; position:relative; min-width:0; background:#0a0b0e; overflow:hidden}
+  canvas#view{position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; cursor:crosshair}
+  .drop{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:12px;
+    color:var(--muted); text-align:center; pointer-events:none;
+  }
+  .drop.hide{display:none}
+  .drop .big{font-size:18px; color:var(--ink); font-weight:700}
+  .drop kbd{background:var(--panel2); border:1px solid var(--line); border-radius:5px; padding:2px 6px; font-family:ui-monospace,monospace}
+  footer{
+    flex:0 0 auto; display:flex; align-items:center; gap:14px; padding:6px 12px; background:var(--panel);
+    border-top:1px solid var(--line); font-variant-numeric:tabular-nums; color:var(--muted); font-size:12px; flex-wrap:wrap;
+  }
+  footer .pxchip{display:inline-flex; align-items:center; gap:6px}
+  footer .dot{width:13px;height:13px;border-radius:3px;border:1px solid var(--line)}
+  .kv b{color:var(--ink)}
+  .modepanel{display:none}
+  .modepanel.active{display:block}
+  .seg.small button{padding:6px 9px; font-size:11px}
+  select.sel{background:var(--panel2); color:var(--ink); border:1px solid var(--line); border-radius:7px; padding:6px 8px; font-size:12px; flex:1}
+  input[type=file]{display:none}
+  .toast{
+    position:absolute; left:50%; bottom:18px; transform:translateX(-50%); background:var(--panel2); border:1px solid var(--line);
+    color:var(--ink); padding:8px 14px; border-radius:9px; font-size:12px; opacity:0; transition:opacity .2s; pointer-events:none;
+  }
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><b>✂</b> Вырезатель</div>
+  <div class="seg" id="modeSeg">
+    <button data-mode="luma" class="active">SFX / luma</button>
+    <button data-mode="wand">Палочка</button>
+    <button data-mode="brush">Кисть</button>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn" id="openBtn">Открыть…</button>
+  <button class="btn ghost" id="undoBtn" title="Ctrl+Z" disabled>↶</button>
+  <button class="btn ghost" id="redoBtn" title="Ctrl+Shift+Z" disabled>↷</button>
+  <button class="btn primary" id="exportBtn" disabled>Скачать PNG</button>
+  <input type="file" id="file" accept="image/*" />
+</header>
+
+<main>
+  <aside>
+    <!-- AUTO -->
+    <div class="grp">
+      <h3>Авто-вырез</h3>
+      <button class="btn primary" id="autoSfx" style="width:100%;margin-bottom:6px" disabled>✨ Авто SFX (по яркости)</button>
+      <button class="btn" id="autoBg" style="width:100%;margin-bottom:6px" disabled>✨ Авто фон (от краёв)</button>
+      <button class="btn" id="autoAI" style="width:100%" disabled>🤖 ИИ-вырез (любое фото)</button>
+      <p class="hint">«Авто SFX» сам подбирает пороги яркости (метод Отсу) для огня/дыма/молний на тёмном фоне. «Авто фон» убирает ровный фон, связанный с краями. Обе работают оффлайн. «ИИ-вырез» — нейросеть для сложного фото; запускается только через http-сервер (не из file://) и требует интернет на первый раз. После любого авто можно доточить кистью.</p>
+    </div>
+
+    <!-- LUMA -->
+    <div class="modepanel active" data-panel="luma">
+      <div class="grp">
+        <h3>Luma-key (огонь · дым · молнии)</h3>
+        <div class="row">
+          <label>Канал</label>
+          <select class="sel" id="lumaChannel">
+            <option value="max">Макс RGB (для цветного SFX)</option>
+            <option value="luma">Яркость (Rec.709)</option>
+            <option value="r">Только R</option>
+            <option value="g">Только G</option>
+            <option value="b">Только B</option>
+          </select>
+        </div>
+        <div class="row"><label>Ключ-цвет</label>
+          <input type="color" id="lumaKey" value="#000000" class="swatch" style="flex:0 0 auto"/>
+          <button class="btn" id="lumaPick" style="flex:1;padding:6px 8px">Взять фон с краёв</button>
+        </div>
+        <label class="chk"><input type="checkbox" id="lumaSub"/> Вычесть фон (тёмный/градиентный)</label>
+        <div class="row"><label>Чёрная точка</label><input type="range" id="lumaLo" min="0" max="255" value="6"/><span class="val" id="lumaLoV">6</span></div>
+        <div class="row"><label>Белая точка</label><input type="range" id="lumaHi" min="1" max="255" value="120"/><span class="val" id="lumaHiV">120</span></div>
+        <div class="row"><label>Гамма</label><input type="range" id="lumaGamma" min="20" max="300" value="100"/><span class="val" id="lumaGammaV">1.0</span></div>
+        <label class="chk"><input type="checkbox" id="lumaUnmul"/> Восстановить цвет (unmultiply)</label>
+        <p class="hint">Альфа берётся из яркости — глоу и полупрозрачный дым сохраняются плавно, без «лесенки». Unmultiply поднимает тусклый цвет до истинного оттенка (для обычного композитинга). Оставь выкл., если будешь класть эффект «экраном»/аддитивно.</p>
+      </div>
+    </div>
+
+    <!-- WAND -->
+    <div class="modepanel" data-panel="wand">
+      <div class="grp">
+        <h3>Волшебная палочка</h3>
+        <p class="hint" style="margin-top:0">Кликни по фону на холсте — уберётся область похожего цвета.</p>
+        <div class="row"><label>Допуск</label><input type="range" id="wandTol" min="0" max="160" value="28"/><span class="val" id="wandTolV">28</span></div>
+        <div class="row"><label>Мягкий край</label><input type="range" id="wandFeather" min="0" max="60" value="10"/><span class="val" id="wandFeatherV">10</span></div>
+        <div class="row"><label>Режим</label>
+          <div class="seg small" id="wandScope" style="flex:1">
+            <button data-scope="contig" class="active">Смежные</button>
+            <button data-scope="global">Везде</button>
+          </div>
+        </div>
+        <p class="hint">«Смежные» — только связная область от точки клика. «Везде» — весь похожий цвет на изображении. Мягкий край даёт анти-алиас на границе, чтобы не было рваных пикселей.</p>
+      </div>
+    </div>
+
+    <!-- BRUSH -->
+    <div class="modepanel" data-panel="brush">
+      <div class="grp">
+        <h3>Кисть (ручная доводка)</h3>
+        <div class="row">
+          <label>Действие</label>
+          <div class="seg small" id="brushOp" style="flex:1">
+            <button data-op="erase" class="active">Стереть</button>
+            <button data-op="restore">Вернуть</button>
+          </div>
+        </div>
+        <div class="row"><label>Размер</label><input type="range" id="brushSize" min="1" max="200" value="34"/><span class="val" id="brushSizeV">34</span></div>
+        <div class="row"><label>Жёсткость</label><input type="range" id="brushHard" min="0" max="100" value="70"/><span class="val" id="brushHardV">70</span></div>
+        <div class="row"><label>Нажим</label><input type="range" id="brushFlow" min="5" max="100" value="100"/><span class="val" id="brushFlowV">100</span></div>
+        <p class="hint">«Стереть» убирает пиксели в прозрачность, «Вернуть» восстанавливает исходник. Держи <kbd>Alt</kbd>, чтобы временно переключиться на противоположное действие. Колесо мыши с <kbd>Shift</kbd> меняет размер кисти.</p>
+      </div>
+    </div>
+
+    <!-- COMMON -->
+    <div class="grp">
+      <h3>Маска</h3>
+      <div class="row" style="gap:6px">
+        <button class="btn" id="invertBtn" style="flex:1">Инверт.</button>
+        <button class="btn" id="resetMaskBtn" style="flex:1">Сброс маски</button>
+      </div>
+      <label class="chk"><input type="checkbox" id="showMask"/> Показать маску (ч/б)</label>
+    </div>
+    <div class="grp">
+      <h3>Просмотр</h3>
+      <div class="row">
+        <label>Фон</label>
+        <div class="seg small" id="bgSeg" style="flex:1">
+          <button data-bg="checker" class="active">Шахматка</button>
+          <button data-bg="black">Чёрный</button>
+          <button data-bg="white">Белый</button>
+        </div>
+      </div>
+      <div class="row" style="gap:6px">
+        <button class="btn" id="zoomFit" style="flex:1">По окну</button>
+        <button class="btn" id="zoom100" style="flex:1">100%</button>
+      </div>
+      <p class="hint">Колесо — зум к курсору. Пробел или средняя кнопка — панорама. При увеличении пиксели не сглаживаются — видно каждый.</p>
+    </div>
+  </aside>
+
+  <div class="stage" id="stage">
+    <canvas id="view"></canvas>
+    <div class="drop" id="drop">
+      <div class="big">Перетащи картинку сюда</div>
+      <div>или нажми «Открыть…» · можно вставить из буфера <kbd>Ctrl</kbd>+<kbd>V</kbd></div>
+    </div>
+    <div class="toast" id="toast"></div>
+  </div>
+</main>
+
+<footer>
+  <span class="kv">Размер: <b id="fImg">—</b></span>
+  <span class="kv">Зум: <b id="fZoom">—</b></span>
+  <span class="kv pxchip">Пиксель <b id="fXY">—</b> <span class="dot" id="fDot"></span> <b id="fRGBA">—</b></span>
+  <div class="spacer"></div>
+  <span class="kv">Прозрачных: <b id="fTrans">—</b></span>
+</footer>
+
+<script>
+"use strict";
+//==================================================================================
+//  Вырезатель — pixel-perfect извлечение объектов и SFX.
+//  Неразрушающий конвейер:  base(RGBA) ──► luma ──┐
+//                                                 ├─► alpha = lumaA * mask/255
+//                           manual mask (Uint8) ──┘
+//  mask редактируется палочкой и кистью; luma считается из base по параметрам.
+//==================================================================================
+const $ = s => document.querySelector(s);
+const clamp = (v,a,b)=> v<a?a:(v>b?b:v);
+
+const View = $('#view'), VCTX = View.getContext('2d', {alpha:false});
+const stage = $('#stage');
+
+// ---- состояние изображения ----
+let base = null;        // ImageData оригинала (RGBA, alpha=255)
+let mask = null;        // Uint8ClampedArray, ручная маска (255=видно, 0=стёрто)
+let compos = null;      // offscreen canvas с итоговым RGBA на прозрачности
+let cctx = null;        // его контекст
+let W=0, H=0;
+
+// ---- вид ----
+const view = {scale:1, ox:0, oy:0};
+let bgKind='checker', showMask=false;
+
+// ---- режим ----
+let mode='luma';
+const luma = {channel:'max', key:[0,0,0], lo:6, hi:120, gamma:1.0, unmul:false, subtract:false};
+const wand = {tol:28, feather:10, scope:'contig'};
+const brush = {op:'erase', size:34, hard:70, flow:100};
+
+// ---- undo ----
+const undoStack=[], redoStack=[]; const UNDO_MAX=24;
+function snapshot(){ return mask ? mask.slice(0) : null; }
+function pushUndo(){
+  if(!mask) return;
+  undoStack.push(snapshot());
+  if(undoStack.length>UNDO_MAX) undoStack.shift();
+  redoStack.length=0; refreshUndoBtns();
+}
+function doUndo(){
+  if(!undoStack.length) return;
+  redoStack.push(snapshot());
+  mask = undoStack.pop(); refreshUndoBtns(); recompose(); render();
+}
+function doRedo(){
+  if(!redoStack.length) return;
+  undoStack.push(snapshot());
+  mask = redoStack.pop(); refreshUndoBtns(); recompose(); render();
+}
+function refreshUndoBtns(){
+  $('#undoBtn').disabled = !undoStack.length;
+  $('#redoBtn').disabled = !redoStack.length;
+}
+
+//---------------------------------------------------------------- загрузка
+function loadImage(img){
+  W=img.naturalWidth||img.width; H=img.naturalHeight||img.height;
+  const c=document.createElement('canvas'); c.width=W; c.height=H;
+  const x=c.getContext('2d'); x.drawImage(img,0,0);
+  base=x.getImageData(0,0,W,H);
+  // если у исходника уже есть прозрачность — учтём её как стартовую маску
+  mask=new Uint8ClampedArray(W*H);
+  let preTransp=0;
+  for(let i=0;i<W*H;i++){ const av=base.data[i*4+3]; mask[i]=av; if(av<250) preTransp++; }
+  const hadAlpha = preTransp > W*H*0.02; // у картинки уже есть прозрачность
+  // base делаем непрозрачным, чтобы restore возвращал цвет; альфу храним в mask
+  for(let i=0;i<W*H;i++) base.data[i*4+3]=255;
+  compos=document.createElement('canvas'); compos.width=W; compos.height=H;
+  cctx=compos.getContext('2d');
+  undoStack.length=0; redoStack.length=0; refreshUndoBtns();
+  $('#drop').classList.add('hide');
+  $('#exportBtn').disabled=false;
+  $('#autoSfx').disabled=false; $('#autoBg').disabled=false; $('#autoAI').disabled=false;
+  $('#fImg').textContent=W+'×'+H;
+  // если прозрачность уже есть — не трогаем luma (она съест тёмную обводку пиксель-арта)
+  if(hadAlpha){ mode='brush'; $('#modeSeg').children[2].click(); setTimeout(()=>toast('У картинки уже есть прозрачность — luma выключен, чтобы не съесть обводку'),120); }
+  recompose(); zoomFit(); render();
+}
+function fileToImage(file){
+  if(!file) return;
+  const url=URL.createObjectURL(file); const im=new Image();
+  im.onload=()=>{ loadImage(im); URL.revokeObjectURL(url); }; im.src=url;
+}
+
+//---------------------------------------------------------------- luma альфа
+function lumaValue(r,g,b){
+  switch(luma.channel){
+    case 'luma': return 0.2126*r+0.7152*g+0.0722*b;
+    case 'r': return r; case 'g': return g; case 'b': return b;
+    default: return Math.max(r,g,b);
+  }
+}
+// метрика «насколько пиксель НЕ фон» в 0..255. Для чёрного ключа = яркость канала.
+function metricAt(r,g,b){
+  const kr=luma.key[0], kg=luma.key[1], kb=luma.key[2];
+  if(luma.subtract){
+    // вычитаем фон (ключ-цвет) поканально → остаётся только аддитивное свечение
+    return lumaValue(Math.max(0,r-kr), Math.max(0,g-kg), Math.max(0,b-kb));
+  }
+  if(kr===0&&kg===0&&kb===0) return lumaValue(r,g,b);
+  const dr=r-kr, dg=g-kg, db=b-kb;
+  return Math.sqrt(dr*dr+dg*dg+db*db)/Math.sqrt(3);
+}
+// возвращает альфу 0..255 для luma-режима относительно ключ-цвета
+function lumaAlphaAt(r,g,b){
+  const v=metricAt(r,g,b);
+  let a=(v-luma.lo)/Math.max(1,(luma.hi-luma.lo));
+  a=clamp(a,0,1);
+  if(luma.gamma!==1) a=Math.pow(a, luma.gamma);
+  return a*255;
+}
+
+//---------------------------------------------------------------- композит
+function recompose(){
+  if(!base) return;
+  const out=cctx.createImageData(W,H);
+  const bd=base.data, od=out.data;
+  const useLuma = (mode==='luma'); // luma влияет только в своём режиме, иначе маска = вся альфа
+  const kr=luma.key[0], kg=luma.key[1], kb=luma.key[2];
+  for(let i=0,p=0;i<W*H;i++,p+=4){
+    let r=bd[p], g=bd[p+1], b=bd[p+2];
+    let a;
+    if(useLuma){
+      // при вычитании фона цвет тоже считаем от остатка (убираем тёмный base из цвета)
+      if(luma.subtract){ r=Math.max(0,r-kr); g=Math.max(0,g-kg); b=Math.max(0,b-kb); }
+      let la=lumaAlphaAt(bd[p],bd[p+1],bd[p+2]);
+      if(luma.unmul && la>0){
+        const f=255/la; // делим премультипл. на альфу → истинный цвет
+        r=clamp(r*f,0,255); g=clamp(g*f,0,255); b=clamp(b*f,0,255);
+      }
+      a = la * (mask[i]/255);
+    } else {
+      a = mask[i];
+    }
+    od[p]=r; od[p+1]=g; od[p+2]=b; od[p+3]=a;
+  }
+  cctx.putImageData(out,0,0);
+  updateTransStat();
+}
+
+let transTimer=null;
+function updateTransStat(){
+  clearTimeout(transTimer);
+  transTimer=setTimeout(()=>{
+    const d=cctx.getImageData(0,0,W,H).data; let t=0;
+    for(let i=3;i<d.length;i+=4) if(d[i]<8) t++;
+    $('#fTrans').textContent=(100*t/(W*H)).toFixed(1)+'%';
+  }, 60);
+}
+
+//---------------------------------------------------------------- рендер вьюпорта
+function fitCanvasToStage(){
+  const r=stage.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
+  View.width=Math.round(r.width*dpr); View.height=Math.round(r.height*dpr);
+  VCTX.setTransform(dpr,0,0,dpr,0,0);
+}
+function render(){
+  if(!base){ VCTX.setTransform(1,0,0,1,0,0); VCTX.fillStyle='#0a0b0e'; VCTX.fillRect(0,0,View.width,View.height); return; }
+  const dpr=window.devicePixelRatio||1;
+  const w=View.width/dpr, h=View.height/dpr;
+  VCTX.clearRect(0,0,w,h);
+  // фон сцены
+  VCTX.fillStyle='#0a0b0e'; VCTX.fillRect(0,0,w,h);
+  const sx=view.ox, sy=view.oy, sw=W*view.scale, sh=H*view.scale;
+  // фон-подложка под картинкой
+  if(bgKind==='checker') drawChecker(sx,sy,sw,sh);
+  else { VCTX.fillStyle = bgKind==='white'?'#ffffff':'#000000'; VCTX.fillRect(sx,sy,sw,sh); }
+  VCTX.imageSmoothingEnabled=false;
+  if(showMask){
+    // показать маску как ч/б
+    const tmp=document.createElement('canvas'); tmp.width=W; tmp.height=H;
+    const tc=tmp.getContext('2d'); const id=tc.createImageData(W,H);
+    for(let i=0;i<W*H;i++){ const a=(mode==='luma')? (lumaAlphaAt(base.data[i*4],base.data[i*4+1],base.data[i*4+2])*mask[i]/255) : mask[i];
+      id.data[i*4]=id.data[i*4+1]=id.data[i*4+2]=a; id.data[i*4+3]=255; }
+    tc.putImageData(id,0,0); VCTX.drawImage(tmp,sx,sy,sw,sh);
+  } else {
+    VCTX.drawImage(compos,sx,sy,sw,sh);
+  }
+  // рамка
+  VCTX.strokeStyle='rgba(255,255,255,.15)'; VCTX.lineWidth=1;
+  VCTX.strokeRect(sx+.5,sy+.5,sw,sh);
+  // курсор кисти
+  if(mode==='brush' && cursor.in){
+    const rad=brush.size*view.scale/2;
+    VCTX.beginPath(); VCTX.arc(cursor.sx,cursor.sy,rad,0,7); VCTX.strokeStyle=brush.op==='erase'?'#ff5a36':'#46d27e'; VCTX.lineWidth=1.5; VCTX.stroke();
+  }
+  $('#fZoom').textContent=Math.round(view.scale*100)+'%';
+}
+let checkerPat=null;
+function drawChecker(x,y,w,h){
+  if(!checkerPat){
+    const t=document.createElement('canvas'); t.width=t.height=16; const c=t.getContext('2d');
+    c.fillStyle='#3a3f4a'; c.fillRect(0,0,16,16); c.fillStyle='#2a2e37'; c.fillRect(0,0,8,8); c.fillRect(8,8,8,8);
+    checkerPat=VCTX.createPattern(t,'repeat');
+  }
+  VCTX.save(); VCTX.beginPath(); VCTX.rect(x,y,w,h); VCTX.clip();
+  VCTX.fillStyle=checkerPat; VCTX.fillRect(x,y,w,h); VCTX.restore();
+}
+
+//---------------------------------------------------------------- координаты
+function screenToImg(cx,cy){
+  const r=stage.getBoundingClientRect();
+  const x=(cx-r.left-view.ox)/view.scale;
+  const y=(cy-r.top -view.oy)/view.scale;
+  return [Math.floor(x), Math.floor(y)];
+}
+const cursor={in:false, sx:0, sy:0, ix:0, iy:0};
+
+//---------------------------------------------------------------- зум/пан
+function zoomFit(){
+  const r=stage.getBoundingClientRect();
+  const s=Math.min((r.width-40)/W,(r.height-40)/H);
+  view.scale=clamp(s,0.02,40);
+  view.ox=(r.width-W*view.scale)/2; view.oy=(r.height-H*view.scale)/2;
+}
+function zoomAt(factor,cx,cy){
+  const r=stage.getBoundingClientRect();
+  const px=cx-r.left, py=cy-r.top;
+  const ix=(px-view.ox)/view.scale, iy=(py-view.oy)/view.scale;
+  view.scale=clamp(view.scale*factor,0.02,64);
+  view.ox=px-ix*view.scale; view.oy=py-iy*view.scale;
+}
+
+//---------------------------------------------------------------- палочка (flood)
+function magicWand(sx,sy){
+  if(sx<0||sy<0||sx>=W||sy>=H) return;
+  const bd=base.data;
+  const idx=sy*W+sx; const kr=bd[idx*4],kg=bd[idx*4+1],kb=bd[idx*4+2];
+  const tol=wand.tol, feat=wand.feather;
+  const dist=(p)=>{const dr=bd[p*4]-kr,dg=bd[p*4+1]-kg,db=bd[p*4+2]-kb;return Math.sqrt(dr*dr+dg*dg+db*db);};
+  pushUndo();
+  if(wand.scope==='global'){
+    for(let p=0;p<W*H;p++){
+      const d=dist(p);
+      if(d<=tol+feat){ const m = feat>0? clamp((d-tol)/feat,0,1) : (d<=tol?0:1); mask[p]=Math.min(mask[p], Math.round(m*255)); }
+    }
+  } else {
+    const seen=new Uint8Array(W*H); const st=[idx]; seen[idx]=1;
+    while(st.length){
+      const p=st.pop(); const d=dist(p);
+      if(d>tol+feat) continue;
+      const m = feat>0? clamp((d-tol)/feat,0,1) : (d<=tol?0:1);
+      mask[p]=Math.min(mask[p], Math.round(m*255));
+      const x=p%W, y=(p/W)|0;
+      if(x>0&&!seen[p-1]){seen[p-1]=1;st.push(p-1);}
+      if(x<W-1&&!seen[p+1]){seen[p+1]=1;st.push(p+1);}
+      if(y>0&&!seen[p-W]){seen[p-W]=1;st.push(p-W);}
+      if(y<H-1&&!seen[p+W]){seen[p+W]=1;st.push(p+W);}
+    }
+  }
+  recompose(); render();
+}
+
+//---------------------------------------------------------------- кисть
+let painting=false, lastPaint=null;
+function paintAt(ix,iy,op){
+  const rad=brush.size/2;
+  const hard=brush.hard/100, flow=brush.flow/100;
+  const x0=Math.max(0,Math.floor(ix-rad)), x1=Math.min(W-1,Math.ceil(ix+rad));
+  const y0=Math.max(0,Math.floor(iy-rad)), y1=Math.min(H-1,Math.ceil(iy+rad));
+  for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++){
+    const dx=x-ix, dy=y-iy; const d=Math.sqrt(dx*dx+dy*dy);
+    if(d>rad) continue;
+    // falloff: до hard*rad — полный, дальше плавно к 0
+    let f; const inner=hard*rad;
+    if(d<=inner) f=1; else f=1-(d-inner)/Math.max(1e-3,(rad-inner));
+    f=clamp(f,0,1)*flow;
+    const p=y*W+x;
+    if(op==='erase') mask[p]=Math.round(mask[p]*(1-f));
+    else mask[p]=Math.round(mask[p]+(255-mask[p])*f); // вернуть к 255
+  }
+}
+function strokeSegment(ax,ay,bx,by,op){
+  const dist=Math.hypot(bx-ax,by-ay);
+  const step=Math.max(1,brush.size/4);
+  const n=Math.max(1,Math.ceil(dist/step));
+  for(let i=0;i<=n;i++){ const t=i/n; paintAt(ax+(bx-ax)*t, ay+(by-ay)*t, op); }
+}
+
+//==================================================================================
+//  Авто-вырез
+//==================================================================================
+function otsu(hist,total){
+  let sum=0; for(let i=0;i<256;i++) sum+=i*hist[i];
+  let sumB=0,wB=0,maxVar=0,thr=0;
+  for(let t=0;t<256;t++){
+    wB+=hist[t]; if(wB===0) continue; const wF=total-wB; if(wF===0) break;
+    sumB+=t*hist[t]; const mB=sumB/wB, mF=(sum-sumB)/wF;
+    const between=wB*wF*(mB-mF)*(mB-mF);
+    if(between>maxVar){ maxVar=between; thr=t; }
+  }
+  return thr;
+}
+// средний цвет рамки кадра (оценка фона)
+function sampleBorderColor(){
+  const bd=base.data; let sr=0,sg=0,sb=0,cnt=0;
+  const cb=(x,y)=>{const p=(y*W+x)*4; sr+=bd[p];sg+=bd[p+1];sb+=bd[p+2];cnt++;};
+  for(let x=0;x<W;x++){cb(x,0);cb(x,H-1);} for(let y=0;y<H;y++){cb(0,y);cb(W-1,y);}
+  return [Math.round(sr/cnt),Math.round(sg/cnt),Math.round(sb/cnt)];
+}
+// Авто SFX: оценить фон с краёв, включить вычитание, метод Отсу → пороги lo/hi
+function autoSfx(){
+  if(!base) return;
+  if(mode!=='luma') $('#modeSeg').children[0].click();
+  // фон с краёв; если он заметно не чёрный — включаем вычитание
+  const c=sampleBorderColor(); const bgLum=Math.max(c[0],c[1],c[2]);
+  luma.key=c; $('#lumaKey').value='#'+c.map(v=>v.toString(16).padStart(2,'0')).join('');
+  luma.subtract = bgLum>6; $('#lumaSub').checked=luma.subtract;
+  const bd=base.data, hist=new Uint32Array(256), N=W*H;
+  for(let i=0,p=0;i<N;i++,p+=4){ const v=Math.round(clamp(metricAt(bd[p],bd[p+1],bd[p+2]),0,255)); hist[v]++; }
+  const T=otsu(hist,N);
+  luma.lo=clamp(Math.round(T*0.45),1,250);
+  luma.hi=clamp(Math.round(T+ (255-T)*0.4), luma.lo+10, 255);
+  $('#lumaLo').value=luma.lo; $('#lumaLoV').textContent=luma.lo;
+  $('#lumaHi').value=luma.hi; $('#lumaHiV').textContent=luma.hi;
+  recompose(); render(); toast('Авто SFX: фон '+(luma.subtract?'вычтен, ':'')+'порог '+T);
+}
+// Авто фон: убираем ровный фон, связанный с краями кадра (multi-source flood)
+function autoBorderRemove(){
+  if(!base) return;
+  if(mode==='luma') $('#modeSeg').children[2].click(); // в режим маски
+  const bd=base.data, N=W*H;
+  // средний цвет рамки + разброс → авто-допуск
+  let sr=0,sg=0,sb=0,cnt=0;
+  const sampleBorder=cb=>{ for(let x=0;x<W;x++){cb(x,0);cb(x,H-1);} for(let y=0;y<H;y++){cb(0,y);cb(W-1,y);} };
+  sampleBorder((x,y)=>{const p=(y*W+x)*4; sr+=bd[p];sg+=bd[p+1];sb+=bd[p+2];cnt++;});
+  const br=sr/cnt, bg=sg/cnt, bb=sb/cnt;
+  let dev=0; sampleBorder((x,y)=>{const p=(y*W+x)*4; const dr=bd[p]-br,dg=bd[p+1]-bg,db=bd[p+2]-bb; dev+=Math.sqrt(dr*dr+dg*dg+db*db);});
+  dev/=cnt;
+  const tol=clamp(dev*2+16, 18, 110), feat=14;
+  const dist=p=>{const dr=bd[p*4]-br,dg=bd[p*4+1]-bg,db=bd[p*4+2]-bb;return Math.sqrt(dr*dr+dg*dg+db*db);};
+  pushUndo();
+  const seen=new Uint8Array(N), st=[];
+  sampleBorder((x,y)=>{const p=y*W+x; if(!seen[p]){seen[p]=1; st.push(p);}});
+  while(st.length){
+    const p=st.pop(); const d=dist(p);
+    if(d>tol+feat) continue;
+    const m = feat>0? clamp((d-tol)/feat,0,1) : (d<=tol?0:1);
+    mask[p]=Math.min(mask[p], Math.round(m*255));
+    const x=p%W, y=(p/W)|0;
+    if(x>0&&!seen[p-1]){seen[p-1]=1;st.push(p-1);}
+    if(x<W-1&&!seen[p+1]){seen[p+1]=1;st.push(p+1);}
+    if(y>0&&!seen[p-W]){seen[p-W]=1;st.push(p-W);}
+    if(y<H-1&&!seen[p+W]){seen[p+W]=1;st.push(p+W);}
+  }
+  recompose(); render(); toast('Авто фон: допуск '+Math.round(tol));
+}
+// ИИ-вырез: нейросеть (@imgly/background-removal) через CDN
+let aiBusy=false;
+async function autoAI(){
+  if(!base || aiBusy) return;
+  // ИИ-модели (воркеры + WASM + докачка с CDN) не запускаются из file:// — нужен http-сервер
+  if(location.protocol==='file:'){
+    alert('🤖 ИИ-вырез не работает при открытии файла напрямую (file://).\n\n'+
+          'Браузер блокирует загрузку нейросети из локального файла.\n\n'+
+          'Запусти через локальный сервер (в папке tools):\n'+
+          '   python -m http.server 8080\n'+
+          'или\n'+
+          '   npx serve\n\n'+
+          'и открой http://localhost:8080\n\n'+
+          'Кнопки ✨ Авто SFX / Авто фон работают и так, без сервера и интернета — для твоих эффектов они и нужны.');
+    return;
+  }
+  aiBusy=true; const btn=$('#autoAI'); const oldTxt=btn.textContent;
+  btn.disabled=true; btn.textContent='🤖 Загрузка модели…'; toast('ИИ: загрузка модели (первый раз — дольше)…');
+  try{
+    const mod=await import('https://esm.sh/@imgly/background-removal@1.5.5');
+    btn.textContent='🤖 Обработка…'; toast('ИИ: обработка изображения…');
+    // исходник в blob
+    const src=document.createElement('canvas'); src.width=W; src.height=H;
+    src.getContext('2d').putImageData(base,0,0);
+    const srcBlob=await new Promise(r=>src.toBlob(r,'image/png'));
+    const outBlob=await mod.removeBackground(srcBlob,{ output:{format:'image/png'} });
+    // читаем альфу результата
+    const url=URL.createObjectURL(outBlob); const im=new Image();
+    await new Promise((res,rej)=>{ im.onload=res; im.onerror=rej; im.src=url; });
+    const rc=document.createElement('canvas'); rc.width=W; rc.height=H;
+    const rx=rc.getContext('2d'); rx.drawImage(im,0,0,W,H);
+    const rd=rx.getImageData(0,0,W,H).data; URL.revokeObjectURL(url);
+    if(mode==='luma') $('#modeSeg').children[2].click(); // маска = полная альфа
+    pushUndo();
+    for(let i=0;i<W*H;i++) mask[i]=rd[i*4+3];
+    recompose(); render(); toast('ИИ-вырез готов · доточи кистью при желании');
+  }catch(err){
+    console.error('AI cutout error:', err);
+    const msg=(err&&err.message)?err.message:String(err);
+    toast('ИИ: ошибка — '+msg.slice(0,80));
+    alert('🤖 ИИ-вырез не удался.\n\nПричина: '+msg+'\n\n'+
+          'Проверь: есть ли интернет, не блокирует ли CDN корпоративный фильтр/расширение, '+
+          'и что страница открыта по http(s), а не file://.\n\n'+
+          'Консоль браузера (F12) покажет детали.');
+  }finally{
+    aiBusy=false; btn.disabled=false; btn.textContent=oldTxt;
+  }
+}
+$('#autoSfx').addEventListener('click',autoSfx);
+$('#autoBg').addEventListener('click',autoBorderRemove);
+$('#autoAI').addEventListener('click',autoAI);
+
+//==================================================================================
+//  События указателя
+//==================================================================================
+let panning=false, panStart=null, spaceDown=false;
+View.addEventListener('pointerdown',e=>{
+  if(!base) return;
+  try{ View.setPointerCapture(e.pointerId); }catch(_){}
+  const mid = e.button===1;
+  if(spaceDown || mid){ panning=true; panStart={x:e.clientX,y:e.clientY,ox:view.ox,oy:view.oy}; return; }
+  const [ix,iy]=screenToImg(e.clientX,e.clientY);
+  if(mode==='wand'){ magicWand(ix,iy); }
+  else if(mode==='brush'){
+    painting=true; pushUndo();
+    const op=effectiveBrushOp(e);
+    paintAt(ix,iy,op); lastPaint=[ix,iy]; recompose(); render();
+  }
+});
+View.addEventListener('pointermove',e=>{
+  const r=stage.getBoundingClientRect();
+  cursor.in=true; cursor.sx=e.clientX-r.left; cursor.sy=e.clientY-r.top;
+  if(panning){ view.ox=panStart.ox+(e.clientX-panStart.x); view.oy=panStart.oy+(e.clientY-panStart.y); render(); return; }
+  if(!base) return;
+  const [ix,iy]=screenToImg(e.clientX,e.clientY);
+  cursor.ix=ix; cursor.iy=iy;
+  updatePixelReadout(ix,iy);
+  if(painting && mode==='brush'){
+    const op=effectiveBrushOp(e);
+    if(lastPaint) strokeSegment(lastPaint[0],lastPaint[1],ix,iy,op); else paintAt(ix,iy,op);
+    lastPaint=[ix,iy]; recompose(); render();
+  } else if(mode==='brush'){ render(); }
+});
+function endStroke(){ painting=false; panning=false; lastPaint=null; }
+View.addEventListener('pointerup',endStroke);
+View.addEventListener('pointercancel',endStroke);
+View.addEventListener('pointerleave',()=>{ cursor.in=false; render(); });
+View.addEventListener('wheel',e=>{
+  e.preventDefault();
+  if(e.shiftKey && mode==='brush'){
+    brush.size=clamp(brush.size+(e.deltaY<0?2:-2),1,200); $('#brushSize').value=brush.size; $('#brushSizeV').textContent=brush.size; render(); return;
+  }
+  zoomAt(e.deltaY<0?1.12:1/1.12, e.clientX, e.clientY); render();
+},{passive:false});
+
+function effectiveBrushOp(e){
+  let op=brush.op; if(e.altKey) op = op==='erase'?'restore':'erase'; return op;
+}
+
+function updatePixelReadout(ix,iy){
+  if(ix<0||iy<0||ix>=W||iy>=H){ $('#fXY').textContent='—'; $('#fRGBA').textContent='—'; $('#fDot').style.background='transparent'; return; }
+  const p=(iy*W+ix);
+  const r=base.data[p*4],g=base.data[p*4+1],b=base.data[p*4+2];
+  let a;
+  if(mode==='luma') a=Math.round(lumaAlphaAt(r,g,b)*mask[p]/255); else a=mask[p];
+  $('#fXY').textContent=ix+','+iy;
+  $('#fRGBA').textContent=`${r} ${g} ${b} · α${a}`;
+  $('#fDot').style.background=`rgba(${r},${g},${b},${a/255})`;
+}
+
+//==================================================================================
+//  UI-привязки
+//==================================================================================
+function bindRange(id,obj,key,fmt){
+  const el=$('#'+id), out=$('#'+id+'V');
+  const set=()=>{ let v=+el.value; if(fmt){ obj[key]=fmt.calc(v); out.textContent=fmt.show(v);} else { obj[key]=v; out.textContent=v; } };
+  el.addEventListener('input',()=>{ set(); recompose(); render(); });
+  set();
+}
+// luma
+$('#lumaChannel').addEventListener('change',e=>{ luma.channel=e.target.value; recompose(); render(); });
+$('#lumaKey').addEventListener('input',e=>{ const h=e.target.value; luma.key=[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]; recompose(); render(); });
+bindRange('lumaLo',luma,'lo');
+bindRange('lumaHi',luma,'hi');
+bindRange('lumaGamma',luma,'gamma',{calc:v=>v/100, show:v=>(v/100).toFixed(2)});
+$('#lumaUnmul').addEventListener('change',e=>{ luma.unmul=e.target.checked; recompose(); render(); });
+$('#lumaSub').addEventListener('change',e=>{ luma.subtract=e.target.checked; recompose(); render(); });
+$('#lumaPick').addEventListener('click',()=>{ if(!base) return; const c=sampleBorderColor(); luma.key=c; $('#lumaKey').value='#'+c.map(v=>v.toString(16).padStart(2,'0')).join(''); recompose(); render(); toast('Фон с краёв: rgb('+c.join(',')+')'); });
+// wand
+bindRange('wandTol',wand,'tol'); bindRange('wandFeather',wand,'feather');
+$('#wandScope').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return; wand.scope=b.dataset.scope; [...e.currentTarget.children].forEach(c=>c.classList.toggle('active',c===b)); });
+// brush
+bindRange('brushSize',brush,'size'); bindRange('brushHard',brush,'hard'); bindRange('brushFlow',brush,'flow');
+$('#brushOp').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return; brush.op=b.dataset.op; [...e.currentTarget.children].forEach(c=>c.classList.toggle('active',c===b)); });
+
+// режимы
+$('#modeSeg').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  mode=b.dataset.mode;
+  [...$('#modeSeg').children].forEach(c=>c.classList.toggle('active',c===b));
+  document.querySelectorAll('.modepanel').forEach(p=>p.classList.toggle('active',p.dataset.panel===mode));
+  View.style.cursor = mode==='brush'?'none':'crosshair';
+  recompose(); render();
+});
+
+// маска
+$('#invertBtn').addEventListener('click',()=>{ if(!mask)return; pushUndo(); for(let i=0;i<mask.length;i++) mask[i]=255-mask[i]; recompose(); render(); });
+$('#resetMaskBtn').addEventListener('click',()=>{ if(!mask)return; pushUndo(); mask.fill(255); recompose(); render(); });
+$('#showMask').addEventListener('change',e=>{ showMask=e.target.checked; render(); });
+
+// фон/зум
+$('#bgSeg').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return; bgKind=b.dataset.bg; [...e.currentTarget.children].forEach(c=>c.classList.toggle('active',c===b)); render(); });
+$('#zoomFit').addEventListener('click',()=>{ zoomFit(); render(); });
+$('#zoom100').addEventListener('click',()=>{ const r=stage.getBoundingClientRect(); const cx=r.left+r.width/2, cy=r.top+r.height/2; const f=1/view.scale; zoomAt(f,cx,cy); render(); });
+
+// файл
+$('#openBtn').addEventListener('click',()=>$('#file').click());
+$('#file').addEventListener('change',e=>fileToImage(e.target.files[0]));
+stage.addEventListener('dragover',e=>{e.preventDefault();});
+stage.addEventListener('drop',e=>{e.preventDefault(); const f=e.dataTransfer.files[0]; if(f) fileToImage(f);});
+window.addEventListener('paste',e=>{ const it=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith('image/')); if(it) fileToImage(it.getAsFile()); });
+
+// экспорт
+$('#exportBtn').addEventListener('click',()=>{
+  recompose();
+  compos.toBlob(b=>{
+    const a=document.createElement('a'); a.href=URL.createObjectURL(b);
+    a.download='cutout.png'; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+    toast('PNG сохранён · '+W+'×'+H);
+  },'image/png');
+});
+
+// undo/redo
+$('#undoBtn').addEventListener('click',doUndo);
+$('#redoBtn').addEventListener('click',doRedo);
+
+// клавиатура
+window.addEventListener('keydown',e=>{
+  if(e.code==='Space'){ spaceDown=true; View.style.cursor='grab'; }
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); e.shiftKey?doRedo():doUndo(); }
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){ e.preventDefault(); doRedo(); }
+  if(e.key==='1'){ $('#modeSeg').children[0].click(); }
+  if(e.key==='2'){ $('#modeSeg').children[1].click(); }
+  if(e.key==='3'){ $('#modeSeg').children[2].click(); }
+});
+window.addEventListener('keyup',e=>{ if(e.code==='Space'){ spaceDown=false; View.style.cursor=mode==='brush'?'none':'crosshair'; } });
+
+// toast
+let toastTimer=null;
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),1800); }
+
+// ресайз
+const ro=new ResizeObserver(()=>{ fitCanvasToStage(); render(); });
+ro.observe(stage);
+fitCanvasToStage(); render();
+</script>
+</body>
+</html>
