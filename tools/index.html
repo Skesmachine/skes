@@ -105,7 +105,7 @@
       <button class="btn primary" id="autoSfx" style="width:100%;margin-bottom:6px" disabled>✨ Авто SFX (по яркости)</button>
       <button class="btn" id="autoBg" style="width:100%;margin-bottom:6px" disabled>✨ Авто фон (от краёв)</button>
       <button class="btn" id="autoAI" style="width:100%" disabled>🤖 ИИ-вырез (любое фото)</button>
-      <p class="hint">«Авто SFX» сам подбирает пороги яркости (метод Отсу) для огня/дыма/молний на тёмном фоне. «Авто фон» убирает ровный фон, связанный с краями. «ИИ-вырез» — нейросеть для любого сложного фото (первый запуск качает модель, нужен интернет). После любого авто можно доточить кистью.</p>
+      <p class="hint">«Авто SFX» сам подбирает пороги яркости (метод Отсу) для огня/дыма/молний на тёмном фоне. «Авто фон» убирает ровный фон, связанный с краями. Обе работают оффлайн. «ИИ-вырез» — нейросеть для сложного фото; запускается только через http-сервер (не из file://) и требует интернет на первый раз. После любого авто можно доточить кистью.</p>
     </div>
 
     <!-- LUMA -->
@@ -568,6 +568,18 @@ function autoBorderRemove(){
 let aiBusy=false;
 async function autoAI(){
   if(!base || aiBusy) return;
+  // ИИ-модели (воркеры + WASM + докачка с CDN) не запускаются из file:// — нужен http-сервер
+  if(location.protocol==='file:'){
+    alert('🤖 ИИ-вырез не работает при открытии файла напрямую (file://).\n\n'+
+          'Браузер блокирует загрузку нейросети из локального файла.\n\n'+
+          'Запусти через локальный сервер (в папке tools):\n'+
+          '   python -m http.server 8080\n'+
+          'или\n'+
+          '   npx serve\n\n'+
+          'и открой http://localhost:8080\n\n'+
+          'Кнопки ✨ Авто SFX / Авто фон работают и так, без сервера и интернета — для твоих эффектов они и нужны.');
+    return;
+  }
   aiBusy=true; const btn=$('#autoAI'); const oldTxt=btn.textContent;
   btn.disabled=true; btn.textContent='🤖 Загрузка модели…'; toast('ИИ: загрузка модели (первый раз — дольше)…');
   try{
@@ -589,8 +601,13 @@ async function autoAI(){
     for(let i=0;i<W*H;i++) mask[i]=rd[i*4+3];
     recompose(); render(); toast('ИИ-вырез готов · доточи кистью при желании');
   }catch(err){
-    console.error(err);
-    toast('ИИ недоступен: нет интернета или CDN заблокирован');
+    console.error('AI cutout error:', err);
+    const msg=(err&&err.message)?err.message:String(err);
+    toast('ИИ: ошибка — '+msg.slice(0,80));
+    alert('🤖 ИИ-вырез не удался.\n\nПричина: '+msg+'\n\n'+
+          'Проверь: есть ли интернет, не блокирует ли CDN корпоративный фильтр/расширение, '+
+          'и что страница открыта по http(s), а не file://.\n\n'+
+          'Консоль браузера (F12) покажет детали.');
   }finally{
     aiBusy=false; btn.disabled=false; btn.textContent=oldTxt;
   }
