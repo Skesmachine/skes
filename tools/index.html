@@ -124,8 +124,9 @@
         </div>
         <div class="row"><label>Ключ-цвет</label>
           <input type="color" id="lumaKey" value="#000000" class="swatch" style="flex:0 0 auto"/>
-          <span class="hint" style="margin:0;flex:1">фон, который убираем</span>
+          <button class="btn" id="lumaPick" style="flex:1;padding:6px 8px">Взять фон с краёв</button>
         </div>
+        <label class="chk"><input type="checkbox" id="lumaSub"/> Вычесть фон (тёмный/градиентный)</label>
         <div class="row"><label>Чёрная точка</label><input type="range" id="lumaLo" min="0" max="255" value="6"/><span class="val" id="lumaLoV">6</span></div>
         <div class="row"><label>Белая точка</label><input type="range" id="lumaHi" min="1" max="255" value="120"/><span class="val" id="lumaHiV">120</span></div>
         <div class="row"><label>Гамма</label><input type="range" id="lumaGamma" min="20" max="300" value="100"/><span class="val" id="lumaGammaV">1.0</span></div>
@@ -242,7 +243,7 @@ let bgKind='checker', showMask=false;
 
 // ---- режим ----
 let mode='luma';
-const luma = {channel:'max', key:[0,0,0], lo:6, hi:120, gamma:1.0, unmul:false};
+const luma = {channel:'max', key:[0,0,0], lo:6, hi:120, gamma:1.0, unmul:false, subtract:false};
 const wand = {tol:28, feather:10, scope:'contig'};
 const brush = {op:'erase', size:34, hard:70, flow:100};
 
@@ -278,7 +279,9 @@ function loadImage(img){
   base=x.getImageData(0,0,W,H);
   // если у исходника уже есть прозрачность — учтём её как стартовую маску
   mask=new Uint8ClampedArray(W*H);
-  for(let i=0;i<W*H;i++) mask[i]=base.data[i*4+3];
+  let preTransp=0;
+  for(let i=0;i<W*H;i++){ const av=base.data[i*4+3]; mask[i]=av; if(av<250) preTransp++; }
+  const hadAlpha = preTransp > W*H*0.02; // у картинки уже есть прозрачность
   // base делаем непрозрачным, чтобы restore возвращал цвет; альфу храним в mask
   for(let i=0;i<W*H;i++) base.data[i*4+3]=255;
   compos=document.createElement('canvas'); compos.width=W; compos.height=H;
@@ -288,6 +291,8 @@ function loadImage(img){
   $('#exportBtn').disabled=false;
   $('#autoSfx').disabled=false; $('#autoBg').disabled=false; $('#autoAI').disabled=false;
   $('#fImg').textContent=W+'×'+H;
+  // если прозрачность уже есть — не трогаем luma (она съест тёмную обводку пиксель-арта)
+  if(hadAlpha){ mode='brush'; $('#modeSeg').children[2].click(); setTimeout(()=>toast('У картинки уже есть прозрачность — luma выключен, чтобы не съесть обводку'),120); }
   recompose(); zoomFit(); render();
 }
 function fileToImage(file){
@@ -307,6 +312,10 @@ function lumaValue(r,g,b){
 // метрика «насколько пиксель НЕ фон» в 0..255. Для чёрного ключа = яркость канала.
 function metricAt(r,g,b){
   const kr=luma.key[0], kg=luma.key[1], kb=luma.key[2];
+  if(luma.subtract){
+    // вычитаем фон (ключ-цвет) поканально → остаётся только аддитивное свечение
+    return lumaValue(Math.max(0,r-kr), Math.max(0,g-kg), Math.max(0,b-kb));
+  }
   if(kr===0&&kg===0&&kb===0) return lumaValue(r,g,b);
   const dr=r-kr, dg=g-kg, db=b-kb;
   return Math.sqrt(dr*dr+dg*dg+db*db)/Math.sqrt(3);
@@ -326,11 +335,14 @@ function recompose(){
   const out=cctx.createImageData(W,H);
   const bd=base.data, od=out.data;
   const useLuma = (mode==='luma'); // luma влияет только в своём режиме, иначе маска = вся альфа
+  const kr=luma.key[0], kg=luma.key[1], kb=luma.key[2];
   for(let i=0,p=0;i<W*H;i++,p+=4){
     let r=bd[p], g=bd[p+1], b=bd[p+2];
     let a;
     if(useLuma){
-      let la=lumaAlphaAt(r,g,b);
+      // при вычитании фона цвет тоже считаем от остатка (убираем тёмный base из цвета)
+      if(luma.subtract){ r=Math.max(0,r-kr); g=Math.max(0,g-kg); b=Math.max(0,b-kb); }
+      let la=lumaAlphaAt(bd[p],bd[p+1],bd[p+2]);
       if(luma.unmul && la>0){
         const f=255/la; // делим премультипл. на альфу → истинный цвет
         r=clamp(r*f,0,255); g=clamp(g*f,0,255); b=clamp(b*f,0,255);
@@ -498,18 +510,29 @@ function otsu(hist,total){
   }
   return thr;
 }
-// Авто SFX: метод Отсу по метрике яркости → пороги lo/hi
+// средний цвет рамки кадра (оценка фона)
+function sampleBorderColor(){
+  const bd=base.data; let sr=0,sg=0,sb=0,cnt=0;
+  const cb=(x,y)=>{const p=(y*W+x)*4; sr+=bd[p];sg+=bd[p+1];sb+=bd[p+2];cnt++;};
+  for(let x=0;x<W;x++){cb(x,0);cb(x,H-1);} for(let y=0;y<H;y++){cb(0,y);cb(W-1,y);}
+  return [Math.round(sr/cnt),Math.round(sg/cnt),Math.round(sb/cnt)];
+}
+// Авто SFX: оценить фон с краёв, включить вычитание, метод Отсу → пороги lo/hi
 function autoSfx(){
   if(!base) return;
   if(mode!=='luma') $('#modeSeg').children[0].click();
+  // фон с краёв; если он заметно не чёрный — включаем вычитание
+  const c=sampleBorderColor(); const bgLum=Math.max(c[0],c[1],c[2]);
+  luma.key=c; $('#lumaKey').value='#'+c.map(v=>v.toString(16).padStart(2,'0')).join('');
+  luma.subtract = bgLum>6; $('#lumaSub').checked=luma.subtract;
   const bd=base.data, hist=new Uint32Array(256), N=W*H;
-  for(let i=0,p=0;i<N;i++,p+=4){ const v=Math.round(metricAt(bd[p],bd[p+1],bd[p+2])); hist[clamp(v,0,255)]++; }
+  for(let i=0,p=0;i<N;i++,p+=4){ const v=Math.round(clamp(metricAt(bd[p],bd[p+1],bd[p+2]),0,255)); hist[v]++; }
   const T=otsu(hist,N);
-  luma.lo=clamp(Math.round(T*0.55),1,250);
-  luma.hi=clamp(Math.round(T+ (255-T)*0.35), luma.lo+10, 255);
+  luma.lo=clamp(Math.round(T*0.45),1,250);
+  luma.hi=clamp(Math.round(T+ (255-T)*0.4), luma.lo+10, 255);
   $('#lumaLo').value=luma.lo; $('#lumaLoV').textContent=luma.lo;
   $('#lumaHi').value=luma.hi; $('#lumaHiV').textContent=luma.hi;
-  recompose(); render(); toast('Авто SFX: порог '+T);
+  recompose(); render(); toast('Авто SFX: фон '+(luma.subtract?'вычтен, ':'')+'порог '+T);
 }
 // Авто фон: убираем ровный фон, связанный с краями кадра (multi-source flood)
 function autoBorderRemove(){
@@ -650,6 +673,8 @@ bindRange('lumaLo',luma,'lo');
 bindRange('lumaHi',luma,'hi');
 bindRange('lumaGamma',luma,'gamma',{calc:v=>v/100, show:v=>(v/100).toFixed(2)});
 $('#lumaUnmul').addEventListener('change',e=>{ luma.unmul=e.target.checked; recompose(); render(); });
+$('#lumaSub').addEventListener('change',e=>{ luma.subtract=e.target.checked; recompose(); render(); });
+$('#lumaPick').addEventListener('click',()=>{ if(!base) return; const c=sampleBorderColor(); luma.key=c; $('#lumaKey').value='#'+c.map(v=>v.toString(16).padStart(2,'0')).join(''); recompose(); render(); toast('Фон с краёв: rgb('+c.join(',')+')'); });
 // wand
 bindRange('wandTol',wand,'tol'); bindRange('wandFeather',wand,'feather');
 $('#wandScope').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return; wand.scope=b.dataset.scope; [...e.currentTarget.children].forEach(c=>c.classList.toggle('active',c===b)); });
