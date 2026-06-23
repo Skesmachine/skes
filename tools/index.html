@@ -99,6 +99,15 @@
 
 <main>
   <aside>
+    <!-- AUTO -->
+    <div class="grp">
+      <h3>Авто-вырез</h3>
+      <button class="btn primary" id="autoSfx" style="width:100%;margin-bottom:6px" disabled>✨ Авто SFX (по яркости)</button>
+      <button class="btn" id="autoBg" style="width:100%;margin-bottom:6px" disabled>✨ Авто фон (от краёв)</button>
+      <button class="btn" id="autoAI" style="width:100%" disabled>🤖 ИИ-вырез (любое фото)</button>
+      <p class="hint">«Авто SFX» сам подбирает пороги яркости (метод Отсу) для огня/дыма/молний на тёмном фоне. «Авто фон» убирает ровный фон, связанный с краями. «ИИ-вырез» — нейросеть для любого сложного фото (первый запуск качает модель, нужен интернет). После любого авто можно доточить кистью.</p>
+    </div>
+
     <!-- LUMA -->
     <div class="modepanel active" data-panel="luma">
       <div class="grp">
@@ -277,6 +286,7 @@ function loadImage(img){
   undoStack.length=0; redoStack.length=0; refreshUndoBtns();
   $('#drop').classList.add('hide');
   $('#exportBtn').disabled=false;
+  $('#autoSfx').disabled=false; $('#autoBg').disabled=false; $('#autoAI').disabled=false;
   $('#fImg').textContent=W+'×'+H;
   recompose(); zoomFit(); render();
 }
@@ -294,18 +304,16 @@ function lumaValue(r,g,b){
     default: return Math.max(r,g,b);
   }
 }
+// метрика «насколько пиксель НЕ фон» в 0..255. Для чёрного ключа = яркость канала.
+function metricAt(r,g,b){
+  const kr=luma.key[0], kg=luma.key[1], kb=luma.key[2];
+  if(kr===0&&kg===0&&kb===0) return lumaValue(r,g,b);
+  const dr=r-kr, dg=g-kg, db=b-kb;
+  return Math.sqrt(dr*dr+dg*dg+db*db)/Math.sqrt(3);
+}
 // возвращает альфу 0..255 для luma-режима относительно ключ-цвета
 function lumaAlphaAt(r,g,b){
-  // метрика: насколько пиксель «не фон». Для чёрного ключа = яркость канала.
-  const kr=luma.key[0], kg=luma.key[1], kb=luma.key[2];
-  let v;
-  if(kr===0&&kg===0&&kb===0){
-    v = lumaValue(r,g,b);
-  } else {
-    // обобщение: дистанция до ключ-цвета, нормированная в 0..255
-    const dr=r-kr, dg=g-kg, db=b-kb;
-    v = Math.sqrt(dr*dr+dg*dg+db*db)/Math.sqrt(3);
-  }
+  const v=metricAt(r,g,b);
   let a=(v-luma.lo)/Math.max(1,(luma.hi-luma.lo));
   a=clamp(a,0,1);
   if(luma.gamma!==1) a=Math.pow(a, luma.gamma);
@@ -475,6 +483,98 @@ function strokeSegment(ax,ay,bx,by,op){
   const n=Math.max(1,Math.ceil(dist/step));
   for(let i=0;i<=n;i++){ const t=i/n; paintAt(ax+(bx-ax)*t, ay+(by-ay)*t, op); }
 }
+
+//==================================================================================
+//  Авто-вырез
+//==================================================================================
+function otsu(hist,total){
+  let sum=0; for(let i=0;i<256;i++) sum+=i*hist[i];
+  let sumB=0,wB=0,maxVar=0,thr=0;
+  for(let t=0;t<256;t++){
+    wB+=hist[t]; if(wB===0) continue; const wF=total-wB; if(wF===0) break;
+    sumB+=t*hist[t]; const mB=sumB/wB, mF=(sum-sumB)/wF;
+    const between=wB*wF*(mB-mF)*(mB-mF);
+    if(between>maxVar){ maxVar=between; thr=t; }
+  }
+  return thr;
+}
+// Авто SFX: метод Отсу по метрике яркости → пороги lo/hi
+function autoSfx(){
+  if(!base) return;
+  if(mode!=='luma') $('#modeSeg').children[0].click();
+  const bd=base.data, hist=new Uint32Array(256), N=W*H;
+  for(let i=0,p=0;i<N;i++,p+=4){ const v=Math.round(metricAt(bd[p],bd[p+1],bd[p+2])); hist[clamp(v,0,255)]++; }
+  const T=otsu(hist,N);
+  luma.lo=clamp(Math.round(T*0.55),1,250);
+  luma.hi=clamp(Math.round(T+ (255-T)*0.35), luma.lo+10, 255);
+  $('#lumaLo').value=luma.lo; $('#lumaLoV').textContent=luma.lo;
+  $('#lumaHi').value=luma.hi; $('#lumaHiV').textContent=luma.hi;
+  recompose(); render(); toast('Авто SFX: порог '+T);
+}
+// Авто фон: убираем ровный фон, связанный с краями кадра (multi-source flood)
+function autoBorderRemove(){
+  if(!base) return;
+  if(mode==='luma') $('#modeSeg').children[2].click(); // в режим маски
+  const bd=base.data, N=W*H;
+  // средний цвет рамки + разброс → авто-допуск
+  let sr=0,sg=0,sb=0,cnt=0;
+  const sampleBorder=cb=>{ for(let x=0;x<W;x++){cb(x,0);cb(x,H-1);} for(let y=0;y<H;y++){cb(0,y);cb(W-1,y);} };
+  sampleBorder((x,y)=>{const p=(y*W+x)*4; sr+=bd[p];sg+=bd[p+1];sb+=bd[p+2];cnt++;});
+  const br=sr/cnt, bg=sg/cnt, bb=sb/cnt;
+  let dev=0; sampleBorder((x,y)=>{const p=(y*W+x)*4; const dr=bd[p]-br,dg=bd[p+1]-bg,db=bd[p+2]-bb; dev+=Math.sqrt(dr*dr+dg*dg+db*db);});
+  dev/=cnt;
+  const tol=clamp(dev*2+16, 18, 110), feat=14;
+  const dist=p=>{const dr=bd[p*4]-br,dg=bd[p*4+1]-bg,db=bd[p*4+2]-bb;return Math.sqrt(dr*dr+dg*dg+db*db);};
+  pushUndo();
+  const seen=new Uint8Array(N), st=[];
+  sampleBorder((x,y)=>{const p=y*W+x; if(!seen[p]){seen[p]=1; st.push(p);}});
+  while(st.length){
+    const p=st.pop(); const d=dist(p);
+    if(d>tol+feat) continue;
+    const m = feat>0? clamp((d-tol)/feat,0,1) : (d<=tol?0:1);
+    mask[p]=Math.min(mask[p], Math.round(m*255));
+    const x=p%W, y=(p/W)|0;
+    if(x>0&&!seen[p-1]){seen[p-1]=1;st.push(p-1);}
+    if(x<W-1&&!seen[p+1]){seen[p+1]=1;st.push(p+1);}
+    if(y>0&&!seen[p-W]){seen[p-W]=1;st.push(p-W);}
+    if(y<H-1&&!seen[p+W]){seen[p+W]=1;st.push(p+W);}
+  }
+  recompose(); render(); toast('Авто фон: допуск '+Math.round(tol));
+}
+// ИИ-вырез: нейросеть (@imgly/background-removal) через CDN
+let aiBusy=false;
+async function autoAI(){
+  if(!base || aiBusy) return;
+  aiBusy=true; const btn=$('#autoAI'); const oldTxt=btn.textContent;
+  btn.disabled=true; btn.textContent='🤖 Загрузка модели…'; toast('ИИ: загрузка модели (первый раз — дольше)…');
+  try{
+    const mod=await import('https://esm.sh/@imgly/background-removal@1.5.5');
+    btn.textContent='🤖 Обработка…'; toast('ИИ: обработка изображения…');
+    // исходник в blob
+    const src=document.createElement('canvas'); src.width=W; src.height=H;
+    src.getContext('2d').putImageData(base,0,0);
+    const srcBlob=await new Promise(r=>src.toBlob(r,'image/png'));
+    const outBlob=await mod.removeBackground(srcBlob,{ output:{format:'image/png'} });
+    // читаем альфу результата
+    const url=URL.createObjectURL(outBlob); const im=new Image();
+    await new Promise((res,rej)=>{ im.onload=res; im.onerror=rej; im.src=url; });
+    const rc=document.createElement('canvas'); rc.width=W; rc.height=H;
+    const rx=rc.getContext('2d'); rx.drawImage(im,0,0,W,H);
+    const rd=rx.getImageData(0,0,W,H).data; URL.revokeObjectURL(url);
+    if(mode==='luma') $('#modeSeg').children[2].click(); // маска = полная альфа
+    pushUndo();
+    for(let i=0;i<W*H;i++) mask[i]=rd[i*4+3];
+    recompose(); render(); toast('ИИ-вырез готов · доточи кистью при желании');
+  }catch(err){
+    console.error(err);
+    toast('ИИ недоступен: нет интернета или CDN заблокирован');
+  }finally{
+    aiBusy=false; btn.disabled=false; btn.textContent=oldTxt;
+  }
+}
+$('#autoSfx').addEventListener('click',autoSfx);
+$('#autoBg').addEventListener('click',autoBorderRemove);
+$('#autoAI').addEventListener('click',autoAI);
 
 //==================================================================================
 //  События указателя
