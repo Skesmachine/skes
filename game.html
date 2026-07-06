@@ -247,7 +247,7 @@ body.on .win .neon:not(.off){animation:neonblink 4.5s infinite}
 <div class="scr on" id="scr-title">
   <h1 class="logo">СКЕС МАШИНА<small>НОЧНАЯ СМЕНА</small></h1>
   <div class="age">18+</div>
-  <p class="tone">Игра не романтизирует стимуляторы — она честно ведёт счёт, сколько тела ты обменял на дедлайн. В конце каждого рана — чек.</p>
+  <p class="tone">Игра не романтизирует стимуляторы — она честно ведёт счёт, сколько тела ты обменял на дедлайн. В конце каждого рана — чек. Ночные события и брелоки — из лора тг-канала «Скес машина».</p>
   <p class="tone" id="pool-note" style="color:var(--text2)">Загружаю банки из обзоров «Скес машины»…</p>
   <div class="classes" id="class-list"></div>
   <button class="btn primary big" id="btn-start" onclick="startRun()"><i class="ti ti-moon"></i> В НОЧЬ</button>
@@ -397,7 +397,38 @@ const FALLBACK_CANS=[
   {name:'Бёрн тропик',     by:'ларёк', p1:7,p2:7,p3:4,p4:5,depr:3,tach:1,trem:0,tier:'A'},
   {name:'Драйв Ми лайм',   by:'ларёк', p1:4,p2:4,p3:6,p4:2,depr:5,tach:0,trem:0,tier:'D'},
   {name:'Торнадо шторм',   by:'ларёк', p1:6,p2:8,p3:5,p4:3,depr:4,tach:1,trem:1,tier:'B'},
-  {name:'Красный бык',     by:'ларёк', p1:8,p2:6,p3:2,p4:8,depr:2,tach:1,trem:0,tier:'S'},
+  {name:'Энергос за 325 рублей', by:'скес', p1:8,p2:6,p3:2,p4:8,depr:2,tach:1,trem:0,tier:'S'},
+];
+
+// ─── ночные события: мемы и лор тг-канала «Скес машина» ─────────────
+// раз за ночь, в случайный час; выбор — через ту же модалку предметов
+const EVENTS=[
+  {id:'gavrila', title:'⚡ УЧЕБНАЯ ТРЕВОГА', text:'Кажется, Гаврила поебался… ЭТО НЕУЧЕНИЕ! Всем приготовиться к расслоению материи и пространства.',
+    choices:[{label:'Ликовать со всей тусовкой', sub:'+2 ⚡, −2 😬', fx:()=>{ S.bod=clamp(S.bod+2,0,S.bodMax); S.nerv=clamp(S.nerv-2,0,10); }}]},
+  {id:'kachalka', title:'ГАВРИЛА НА СВЯЗИ', text:'Гаврила приказал через 20 минут быть в качалке. Ну хуле поделать.',
+    choices:[
+      {label:'жимприседтягажимприседтяга', sub:'−1 ч, −3 😬', fx:()=>{ advance(2); S.nerv=clamp(S.nerv-3,0,10); }},
+      {label:'«Я занят» (отстоять личные границы)', sub:'+2 🧠', fx:()=>{ S.psyche=clamp(S.psyche+2,0,100); }}]},
+  {id:'omar', title:'МЧС ПРЕДУПРЕЖДАЕТ', text:'Муминов Омар начал бухать страшно. Возможны звонки с признанием любви. …Звонит.',
+    choices:[{label:'Выслушать признание', sub:'−30 мин, −2 😬', fx:()=>{ advance(1); S.nerv=clamp(S.nerv-2,0,10); }}]},
+  {id:'koksh', title:'ВК ЛЁГ', text:'Кокш, ты нахуя ВК опять положил? Интернет прилёг вместе с ним.',
+    choices:[{label:'Ждать и смотреть в стену', sub:'−30 мин', fx:()=>{ advance(1); }}]},
+  {id:'mark', title:'БАЗА ОТ МАРКА', text:'В чат упал лонгрид. База от Марка на связи. Не прочитать нельзя.',
+    choices:[{label:'Прочитать всю базу', sub:'−30 мин, −3 😬', fx:()=>{ advance(1); S.nerv=clamp(S.nerv-3,0,10); }}]},
+  {id:'dacha', title:'ОБЩИЙ СБОР', text:'Пацаны, общий сбор через час на даче с телками. Адрес: с. Рофляново, ул. Пушкина, д. Колотушкина.',
+    choices:[
+      {label:'Поехать', sub:'−3 ч, −4 😬, −6 🧠', fx:()=>{ advance(6); S.nerv=clamp(S.nerv-4,0,10); S.psyche=clamp(S.psyche-6,0,100); }},
+      {label:'«Какая дача, такие и телки»', sub:'+1 😬', fx:()=>{ S.nerv=clamp(S.nerv+1,0,10); }}]},
+  {id:'bassuha', title:'БАССУХА', text:'Сосед врубил дробящую кости бассуху. ПК прилёг. Пора вести счёт.',
+    choices:[{label:'Перезагрузить всё', sub:'−30 мин, +1 😬', fx:()=>{ advance(1); S.nerv=clamp(S.nerv+1,0,10); }}]},
+  {id:'kartel', title:'КАРТЕЛЬ НА СВЯЗИ', text:'Мексиканский картель поставил тебя на счётчик: минимум 10 лайков, иначе минус конечность.',
+    choices:[{label:'Показать статистику', sub:'есть 10 👍 → −2 🧠, нет → +3 🧠', fx:()=>{
+      if(S.likes>=10){ S.psyche=clamp(S.psyche-2,0,100); log('Картель доволен цифрами. Конечности целы. −2 🧠'); }
+      else{ S.psyche=clamp(S.psyche+3,0,100); log('Лайков мало. Картель недоволен. +3 🧠'); } }}]},
+  {id:'shiza', title:'АРМИЯ ШИЗОВ', text:'Опрос в тгк: «Есть ли у вас внутренний монолог?» Ты залип, отвечая развёрнуто.',
+    choices:[{label:'Перейти на гуморальную регуляцию', sub:'−30 мин, −1 🧠', fx:()=>{ advance(1); S.psyche=clamp(S.psyche-1,0,100); }}]},
+  {id:'elf', title:'ЗА ОКНОМ', text:'Ты видел эльфа у ларька, нахуй. И червя огромного.', minPsy:60,
+    choices:[{label:'Теперь я знаю правду', sub:'+3 🧠', fx:()=>{ S.psyche=clamp(S.psyche+3,0,100); }}]},
 ];
 
 // ─── пул курева: на сайте обзоров на сиги нет — локальный пул по GDD ─
@@ -431,6 +462,13 @@ const TRINKETS=[
   {id:'irony',    name:'Ирония',            r:'S', desc:'Психика 60+ даёт +15% к работе вместо помех'},
   {id:'bluecheck',name:'Синяя галочка',     r:'A', desc:'Обзоры приносят ×1.5 лайков'},
   {id:'thread',   name:'Тред-огонёк',       r:'B', desc:'После обзора следующий блок работы +25% (на волне хайпа)'},
+  // ─── брелоки-мемы из тг-канала «Скес машина» ───
+  {id:'cap',      name:'Кепка задом наперёд',r:'C', desc:'10% шанс, что любой негативный бросок — наёбка (игнорируется)'},
+  {id:'eblan',    name:'Ботинки EBLAN',     r:'B', desc:'Стрит кредабилити: лайки за обзоры +25%'},
+  {id:'klod',     name:'Пачка клода',       r:'A', desc:'Раз за ночь предотвращает срыв — всё не так уж плохо на сегодняшний день'},
+  {id:'tvorog',   name:'Творог Гаврилы',    r:'C', desc:'Общий сбор творога: сон даёт +2 ⚡ дополнительно'},
+  {id:'creatine', name:'Креатин',           r:'B', desc:'+1 к максимуму Бодрости (опасная металлоконструкция)'},
+  {id:'mukhomor', name:'Водка с мухоморами',r:'S', desc:'Каждый блок работы: выработка ×0.5–×2.5 наугад'},
 ];
 const TRINKET_PRICE={C:120,B:200,A:320,S:500};
 
@@ -550,6 +588,7 @@ function startRun(){
     work:0, totalWork:0, carriedDebt:0, freeUsed:false, hospitalPardonUsed:false, hospitalTonight:false,
     fridge:[], smokes:[], trinkets:[],
     comboWin:0, comboLeft:0, comboMult:1, comboTonight:0, lastCanHeart:0,
+    eventTick:99, eventDone:true, klodTonight:false,
     nobleBoost:false, threadBoost:false, tremorPending:false,
     consumedTonight:[], reviewed:{}, studied:{}, morningDepr:0,
     cigCount:0, validolUsed:false, shopStock:null, ended:false, asleep:false,
@@ -568,6 +607,8 @@ function startNight(){
   S.consumedTonight=[]; S.morningDepr=0; S.hospitalTonight=false; S.asleep=false;
   S.nobleBoost=false; S.threadBoost=false; S.tremorPending=false;
   S.shopStock=null;
+  S.klodTonight=false;
+  S.eventTick=4+Math.floor(rnd()*10); S.eventDone=false;   // одно событие за ночь
   log('— НОЧЬ '+S.night+'. Дедлайн '+(S.cycle+1)+' через '+(4-S.cycleNight)+' ноч. Квота: '+quotaLeft()+' ед.');
   screen('scr-room'); renderRoom();
 }
@@ -679,13 +720,36 @@ function afterAction(){
   if(S.ended) return;
   if(S.bod<=0 && !S.asleep){ S.asleep=true; log('<b>Бодрость на нуле.</b> Ты уснул лицом в клавиатуру.'); endNight(true); return; }
   if(S.t>=NIGHT_TICKS){ endNight(false); return; }
+  if(!S.eventDone && S.t>=S.eventTick && S.t<NIGHT_TICKS-1){ S.eventDone=true; fireEvent(); return; }
   renderRoom();
 }
 
+// ─── ночное событие из лора канала ───────────────────────────────────
+function fireEvent(){
+  const pool=EVENTS.filter(e=>!e.minPsy || S.psyche>=e.minPsy);
+  const ev=pool[Math.floor(rnd()*pool.length)];
+  renderRoom();
+  openPick(ev.title, ev.choices.map(c=>({
+    html:'<span class="ph"><i class="ti ti-bolt"></i></span><span><span class="nm">'+esc(c.label)+'</span><br><span class="st">'+esc(ev.text)+(c.sub?' · <b>'+esc(c.sub)+'</b>':'')+'</span></span>',
+    fn:()=>{ closePick(); log('<b>'+esc(ev.title)+':</b> '+esc(ev.text)); c.fx(); afterAction(); },
+  })), true);
+}
+
 // ─── РАБОТА ──────────────────────────────────────────────────────────
+// кепка задом наперёд: 10% шанс, что негативный бросок — наёбка
+function capSave(){
+  if(has('cap') && rnd()<0.1){ log('Обратите внимание на кепку: вас <b>не</b> наебали.'); return true; }
+  return false;
+}
+
 function doWork(){
   const wm=workMult();
-  const units=r1(10*wm.m);
+  let units=r1(10*wm.m);
+  if(has('mukhomor')){
+    const f=Math.round((0.5+rnd()*2)*10)/10;
+    units=r1(units*f);
+    log('Мухомор шепчет: выработка ×'+f+'.');
+  }
   S.bod=Math.max(0,S.bod-3);
   const late=hourNow()>=3 && hourNow()<12;
   // скес: нервы не растут; фонк: работа после 03:00 не даёт нервов
@@ -695,11 +759,15 @@ function doWork(){
   if(S.nobleBoost) S.nobleBoost=false;
   if(S.threadBoost) S.threadBoost=false;
   advance(4);
-  if(S.nerv>=10){ // срыв
+  if(S.nerv>=10 && has('klod') && !S.klodTonight){
+    S.klodTonight=true; S.nerv=7;
+    S.work+=units; S.totalWork+=units;
+    log('Нервы на пределе… но если есть в кармане <b>пачка клода</b> — значит, всё не так уж плохо. Срыв отменён, блок сдан (+'+units+' ед).');
+  }else if(S.nerv>=10){ // срыв
     S.stats.breakdowns++;
     const keepBlock=has('earplugs');
     if(keepBlock){ S.work+=units; S.totalWork+=units; log('СРЫВ! Клавиатура летит в стену… но <b>беруши</b> спасли блок ('+units+' ед). −2 ч, +8 🧠'); }
-    else log('<b>СРЫВ!</b> Блок работы потерян, клавиатура — в стене. −2 ч, +8 🧠');
+    else log('<b>СРЫВ!</b> Блок работы потерян, клавиатура — в стене. Осталось два состояния: блябабубы и бабыбля. −2 ч, +8 🧠');
     advance(4);
     S.psyche=clamp(S.psyche+8,0,100);
     S.nerv=5;
@@ -759,7 +827,7 @@ function drinkCan(i){
     +(c.p4?', −'+r1(c.p4*0.3)+' 😬':'')+(c.trem?', тремор!':'')
     +(S.comboWin>=30?'. Окно скеса: '+S.comboWin+' мин!':'. Банка не покурная — скеса не будет.'));
   // рыгучесть
-  if(!has('water') && rnd()<c.p3*0.05*(studied?0.5:1)){
+  if(!has('water') && rnd()<c.p3*0.05*(studied?0.5:1) && !capSave()){
     advance(1); log('<b>Рыгучка.</b> Полчаса потеряны на переговоры с желудком.');
   }
   renderHUD();
@@ -802,7 +870,7 @@ function doSmoke(i){
   S.consumedTonight.push({key, at:S.t, name:s.name, tier:s.tier, type:s.vape?'электронка':'сигарета'});
   log('Покурил «'+esc(s.name)+'»: <b>−'+r1(nervDrop)+' 😬</b>, +'+tarGain+' 🫁'+(s.noble>=4?', благородство (+5% след. блок)':''));
   // головокружность
-  if(rnd()<s.dizzy*0.04*(studied?0.5:1)){ advance(1); log('<b>Поплыл.</b> Полчаса смотрел в стену.'); }
+  if(rnd()<s.dizzy*0.04*(studied?0.5:1) && !capSave()){ advance(1); log('<b>Поплыл.</b> Полчаса смотрел в стену.'); }
   // ─── СКЕС ───
   if(inWindow){
     S.comboWin=0; S.comboTonight++;
@@ -816,7 +884,7 @@ function doSmoke(i){
     if(has('luckybutt') && S.comboTonight===1){ extraTar=0; }
     addTar(extraTar);
     $('flash').classList.remove('go'); void $('flash').offsetWidth; $('flash').classList.add('go');
-    log('<b>★ СКЕС ×'+S.comboMult+' ★</b> Следующие 2 ч выработка ×'+S.comboMult+', нервы не растут… но тело бросает кости: +'+extraHeart+' ❤, +'+extraTar+' 🫁'+(n>1?' (цепочка ×'+rollF+')':''));
+    log('<b>★ СКЕС ×'+S.comboMult+' ★</b> Классическая рубрика: энергос с сигаретой. Следующие 2 ч выработка ×'+S.comboMult+', нервы не растут… но тело бросает кости: +'+extraHeart+' ❤, +'+extraTar+' 🫁'+(n>1?' (цепочка ×'+rollF+')':''));
   }
   renderHUD();
   heartCheck(()=>afterAction());
@@ -838,7 +906,7 @@ function heartCheck(done){
   if(S.heart>=70){
     let chance=clamp((S.heart-55)*1.5,5,95);
     if(has('redcan')) chance+=10;
-    if(rnd()*100<chance){
+    if(rnd()*100<chance && !capSave()){
       if(has('validol') && !S.validolUsed){
         S.validolUsed=true; log('Сердце дёрнулось — <b>валидол под язык.</b> Пронесло.');
         done(); return;
@@ -923,7 +991,7 @@ function doSleep(){
   let overslept=false;
   if(has('casino') && rnd()<0.2){ ticks+=2; overslept=true; }
   advance(Math.min(ticks,ticksLeft()));
-  S.bod=clamp(S.bod+6,0,S.bodMax);
+  S.bod=clamp(S.bod+6+(has('tvorog')?2:0),0,S.bodMax);
   S.nerv=clamp(S.nerv-3,0,10);
   S.heart=clamp(S.heart-5,0,100);
   S.psyche=clamp(S.psyche-3,0,100);
@@ -963,15 +1031,20 @@ function writeReview(c){
   if(S.psyche>=60){ pain+=0.3; painTags.push('депрессивный лонгрид'); }
   let likes=(5+TIER_IDX[c.tier]*4)*fresh*pain;
   if(has('bluecheck')) likes*=1.5;
+  if(has('eblan')) likes*=1.25;
   likes=Math.max(1,Math.round(likes));
   S.likes+=likes; S.likesCycle+=likes; S.stats.likes+=likes; S.stats.reviews++;
   S.reviewed[c.key]=true; S.studied[c.key]=true;
   if(has('thread')) S.threadBoost=true;
   const quips=[
-    'Писал, пока руки помнили вкус.',
-    'Тред разошёлся по чатам тусовки.',
+    'Хуйня 👍',
+    'Я рискнул здоровьем ради вас, поэтому ставьте лайки.',
+    '28 звёзд нахуй, лучший обзор современности. P.S. Одну поставил сам.',
+    'Суки, максимальные просмотры. 600 рублей, я напомню.',
+    'Как вы ещё узнаете, каков энергетик на вкус с сигаретой, если не я?',
+    'Такого не было 228 дней.',
     'В комментах спорят про тир. Значит, зашло.',
-    'Дописал и понял, что хочется ещё одну. Плохой знак.',
+    'Отправлять доклады в комментарии строго в формате .docx, Times New Roman, 14.',
   ];
   $('rev-body').innerHTML=
     '<p>«'+esc(c.name)+'» ['+c.tier+'] — обзор улетел на «Скес машину».</p>'
@@ -989,6 +1062,10 @@ function writeReview(c){
 
 // ─── ЛАРЁК ───────────────────────────────────────────────────────────
 function priceMult(){ return S.cls==='guard'?1.2:1; }
+function gainTrinket(id){
+  S.trinkets.push(id); albumAdd('tr:'+id);
+  if(id==='creatine'){ S.bodMax++; log('Креатин: ты опасная металлоконструкция. Макс. Бодрость +1 ('+S.bodMax+').'); }
+}
 function rollStock(){
   const stock={cans:[],smokes:[],trinket:null};
   for(let i=0;i<3;i++) stock.cans.push(randCanOfTier(pickTierWeighted()));
@@ -1039,7 +1116,7 @@ function renderShop(){
       +'<span class="price">'+price+'₽</span>',
       ()=>{ if(S.trinkets.length>=5){ toast('Все 5 слотов брелоков заняты'); return; }
         if(S.money<price){ toast('Не хватает денег'); return; }
-        S.money-=price; S.trinkets.push(t.id); st.trinket=null; albumAdd('tr:'+t.id);
+        S.money-=price; gainTrinket(t.id); st.trinket=null;
         log('Брелок «'+esc(t.name)+'» на связке ('+S.trinkets.length+'/5).'); renderShop(); }));
   }
   if(!st.cans.length && !st.smokes.length && !st.trinket){
@@ -1062,7 +1139,7 @@ function endNight(fellAsleep, ambulance){
   if(S.ended) return;
   S.t=NIGHT_TICKS;
   const lines=[];
-  if(fellAsleep) lines.push('Уснул лицом в клавиатуру. Остаток ночи — бесплатный, но бесполезный.');
+  if(fellAsleep) lines.push('Уснул лицом в клавиатуру. Будто не ты спал эти часы, а они спали тебя.');
   if(ambulance) lines.push('Ночь закончилась в скорой.');
   // депрессивность банок бьёт утром; психика 60+ удваивает утренние дебаффы
   if(S.morningDepr>0){
@@ -1082,6 +1159,9 @@ function endNight(fellAsleep, ambulance){
   }
   S.bod=S.bodMax; S.nerv=clamp(S.nerv-3,0,10);
   lines.push('Выспался днём: Бодрость '+S.bodMax+'/'+S.bodMax+', −3 😬.');
+  const MQ=['Доброе реп.','Я рождён, чтобы ебашить.','Дух воина, а зарплата чмохи.','Потоскуем!','Нельзя расслабляться.','Набираю оборот.','Курю, следовательно, существую.'];
+  const smokedTonight=S.consumedTonight.some(c=>c.type!=='банка');
+  lines.push('<i style="color:var(--text2)">«'+(smokedTonight&&rnd()<0.4?'Я проснулся от желания курить.':MQ[Math.floor(rnd()*MQ.length)])+'»</i>');
   $('mo-title').textContent='УТРО ПОСЛЕ НОЧИ '+S.night;
   $('mo-body').innerHTML=lines.map(l=>'<p style="margin-bottom:8px">'+l+'</p>').join('')
     +'<p class="mt"><b>Квота: '+Math.floor(S.work)+'/'+effQuota()+'</b>'+(S.cycleNight===3?' — сегодня дедлайн!':' — осталось '+(3-S.cycleNight)+' ноч.')+'</p>';
@@ -1133,7 +1213,7 @@ function resolveDeadline(need,got){
       openPick('НАГРАДА — выбери брелок', pool.map(t=>({
         html:'<span class="ph"><i class="ti ti-key"></i></span><span><span class="nm">'+esc(t.name)+'</span><br><span class="st">'+esc(t.desc)+'</span></span><span class="tier t-'+t.r+'">'+t.r+'</span>',
         fn:()=>{ closePick();
-          if(S.trinkets.length<5){ S.trinkets.push(t.id); albumAdd('tr:'+t.id); toast('Брелок «'+t.name+'» на связке'); }
+          if(S.trinkets.length<5){ gainTrinket(t.id); toast('Брелок «'+t.name+'» на связке'); }
           else toast('Слоты заняты — брелок остался на полке');
           next(); },
       })), true);
@@ -1190,10 +1270,10 @@ function finishRun(kind){
   showReceipt();
 }
 function endingText(){
-  if(S.endKind!=='win') return {t:'ЛЮК', d:'Квота не сдана. Пол-решётка под столом открылась. Сессия осталась там, внизу.'};
-  if(S.heart<40 && S.tar<30) return {t:'СЕКРЕТНАЯ КОНЦОВКА: ПРАВЕДНИК', d:'Сдал сессию почти целым. Тусовка не верит. Мы тоже.'};
-  if(S.heart>=70 && S.tar>=70 && S.psyche>=70) return {t:'ПОБЕДИЛ. НАВЕРНОЕ', d:'Сессия сдана. Осталось вспомнить, зачем.'};
-  return {t:'СДАЛ СЕССИЮ', d:'Дедлайны закрыты. Тело выставило счёт — см. ниже.'};
+  if(S.endKind!=='win') return {t:'ЛЮК', d:'Квота не сдана. Пол-решётка под столом открылась. Кал ведёт только к большему калу.'};
+  if(S.heart<40 && S.tar<30) return {t:'СЕКРЕТНАЯ КОНЦОВКА: ПРАВЕДНИК', d:'Сдал сессию почти целым. Это не физика — это характер. Тусовка не верит.'};
+  if(S.heart>=70 && S.tar>=70 && S.psyche>=70) return {t:'ПОБЕДИЛ. НАВЕРНОЕ', d:'Сессия сдана. За неё ты, конечно, оскотинился. Осталось вспомнить, зачем всё это.'};
+  return {t:'СДАЛ СЕССИЮ', d:'Вкус закрытой сессии. Тело выставило счёт — см. ниже.'};
 }
 function healthMult(){ return clamp((320-S.heart-S.tar-S.psyche)/160,0.5,2); }
 function runScore(){
@@ -1228,7 +1308,7 @@ function showReceipt(){
     +row('Множитель здоровья', '×'+healthMult().toFixed(2))
     +'<div class="row tot"><span>ОЧКИ</span><span>'+score+'</span></div>'
     +'<hr><div style="text-align:center"><b>'+e.t+'</b><br><span style="font-weight:400">'+e.d+'</span></div>'
-    +'<div style="text-align:center;margin-top:10px;font-size:11px">здоровая победа &gt;&gt; грязная победа<br>спасибо за смену · '+new Date().toLocaleDateString('ru-RU')+'</div>';
+    +'<div style="text-align:center;margin-top:10px;font-size:11px">здоровая победа &gt;&gt; грязная победа<br>прод бай скес машина нахуй · '+new Date().toLocaleDateString('ru-RU')+'<br><b>Скес Машина. Подписаться</b></div>';
   screen('scr-receipt');
   document.body.classList.remove('pulse50','pulse70','psycho');
 }
