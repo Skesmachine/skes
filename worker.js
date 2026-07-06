@@ -26,6 +26,8 @@ export default {
     if (url.pathname === '/telegram-auth') return handleTelegramAuth(request, env);
     if (url.pathname === '/account-rename') return handleRename(request, env);
     if (url.pathname === '/account-claim') return handleClaim(request, env);
+    // рогалик «Ночная смена» живёт на короткой ссылке /game
+    if (url.pathname === '/game') return env.ASSETS.fetch(new Request(new URL('/game.html', url).toString(), request));
     return env.ASSETS.fetch(request);
   }
 };

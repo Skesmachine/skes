@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0b0e12">
+<title>Скес машина: Ночная смена</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Rubik:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<style>
+/* ─── Ночная смена: PS1/CRT тёмная комната ─────────────────────────── */
+:root{
+  --bg:#0b0e12; --panel:#141a22; --panel2:#0f141b; --ink:#04060a;
+  --line:#2a3442; --text:#d8e2ea; --text2:#7d8a99;
+  --neon:#ff8a2a; --neon2:#ffc94d; --green:#7dd85f; --red:#ff4d5e;
+  --blue:#4da3ff; --purple:#b06dff; --gold:#ffcd3c;
+  --lcd:#9fe870; --lcdbg:#111d10;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:'Rubik',sans-serif; font-size:15px; line-height:1.45;
+  overflow-x:hidden;
+  -webkit-tap-highlight-color:transparent;
+}
+h1,h2,h3,.px{font-family:'Press Start 2P',monospace; line-height:1.5}
+button{font-family:inherit; cursor:pointer}
+a{color:var(--neon2)}
+
+/* CRT-оверлей: скэнлайны + виньетка. Дёшево и сердито, как надо. */
+#crt{position:fixed; inset:0; pointer-events:none; z-index:90;
+  background:
+    repeating-linear-gradient(0deg, rgba(0,0,0,0.16) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.5) 100%);
+  mix-blend-mode:multiply;}
+@keyframes flick{0%,100%{opacity:1}92%{opacity:1}93%{opacity:0.86}94%{opacity:1}}
+body.on #crt{animation:flick 7s infinite}
+@media (prefers-reduced-motion:reduce){ body.on #crt{animation:none} }
+
+#app{max-width:760px;margin:0 auto;padding:10px 12px 90px;position:relative}
+
+/* ─── HUD ─────────────────────────────────────────────────────────── */
+#hud{display:none; position:sticky; top:0; z-index:40; background:linear-gradient(var(--bg) 82%,transparent);
+  padding:8px 0 12px}
+body.playing #hud{display:block}
+.hud-row{display:flex; gap:8px; align-items:stretch; flex-wrap:wrap}
+.hud-box{background:var(--panel); border:2px solid var(--line); border-radius:8px; padding:6px 9px;
+  box-shadow:0 3px 0 var(--ink); flex:1; min-width:86px}
+.hud-box .lbl{font-size:9px; color:var(--text2); text-transform:uppercase; letter-spacing:0.08em}
+.hud-box .val{font-family:'Press Start 2P'; font-size:13px; margin-top:3px; color:var(--neon2)}
+#hud-clock .val{color:var(--green)}
+#hud-quota .val{color:var(--blue); font-size:11px}
+/* стрелочные приборы: Бодрость / Нервы */
+.dial{position:relative; width:64px; height:38px; overflow:hidden; margin-top:2px}
+.dial .arc{position:absolute; inset:0 0 -38px 0; border-radius:50%;
+  border:5px solid var(--line); border-bottom-color:transparent; border-left-color:transparent; border-right-color:transparent}
+.dial .needle{position:absolute; left:50%; bottom:0; width:2px; height:30px; background:var(--neon2);
+  transform-origin:bottom center; transition:transform 0.5s cubic-bezier(.2,1.4,.4,1)}
+.dial .pin{position:absolute; left:50%; bottom:-3px; width:8px; height:8px; margin-left:-4px; border-radius:50%; background:var(--text)}
+.dial-num{font-family:'Press Start 2P'; font-size:10px; position:absolute; right:4px; top:2px}
+.hud-box.danger{border-color:var(--red); box-shadow:0 3px 0 #4b0f16}
+/* LCD-полоски тела */
+.lcd{display:flex; align-items:center; gap:6px; margin-top:3px}
+.lcd .bar{flex:1; height:10px; background:var(--lcdbg); border:1px solid #26331f; border-radius:2px; overflow:hidden}
+.lcd .fill{height:100%; background:var(--lcd); transition:width 0.4s}
+.lcd .num{font-family:'Press Start 2P'; font-size:9px; min-width:26px; text-align:right}
+.lcd.heart .fill{background:linear-gradient(90deg,#ff8a6a,var(--red))}
+.lcd.tar .fill{background:linear-gradient(90deg,#9aa66a,#c9d34d)}
+.lcd.psy .fill{background:linear-gradient(90deg,#8a7dff,var(--purple))}
+@keyframes hbeat{0%,100%{transform:scale(1)}12%{transform:scale(1.25)}24%{transform:scale(1)}}
+body.pulse50 .lcd.heart i{animation:hbeat 1.1s infinite; color:var(--red)}
+body.pulse70 .lcd.heart i{animation:hbeat 0.6s infinite; color:var(--red)}
+@media (prefers-reduced-motion:reduce){ .lcd i{animation:none!important} }
+
+/* галлюцинации: психика 85+ */
+@keyframes psyjit{0%{transform:translate(0,0)}25%{transform:translate(0.7px,-0.7px)}50%{transform:translate(-0.7px,0.5px)}75%{transform:translate(0.5px,0.7px)}100%{transform:translate(0,0)}}
+body.psycho #app{animation:psyjit 0.22s infinite}
+body.psycho .hud-box .lbl{color:var(--purple)}
+@media (prefers-reduced-motion:reduce){ body.psycho #app{animation:none} }
+
+/* ─── экраны ──────────────────────────────────────────────────────── */
+.scr{display:none}
+.scr.on{display:block}
+.panel{background:var(--panel); border:2px solid var(--line); border-radius:12px;
+  padding:14px; box-shadow:0 4px 0 var(--ink); margin-bottom:12px}
+
+/* титул */
+#scr-title{text-align:center; padding-top:24px}
+.logo{font-size:clamp(17px,4.6vw,28px); color:var(--neon2); text-shadow:3px 3px 0 var(--ink), 0 0 22px rgba(255,138,42,0.4)}
+.logo small{display:block; font-size:0.5em; color:var(--neon); margin-top:10px}
+.age{display:inline-block; margin:10px 0; padding:3px 9px; border:2px solid var(--red); color:var(--red);
+  font-family:'Press Start 2P'; font-size:11px; border-radius:6px}
+.tone{color:var(--text2); font-size:12.5px; max-width:520px; margin:8px auto}
+.classes{display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin:16px 0}
+.cls{background:var(--panel); border:2px solid var(--line); border-radius:12px; padding:12px; text-align:left;
+  box-shadow:0 4px 0 var(--ink); color:var(--text); transition:transform 0.1s}
+.cls:not(.locked):hover{transform:translateY(-2px); border-color:var(--neon)}
+.cls.sel{border-color:var(--neon2); box-shadow:0 4px 0 var(--ink), 0 0 16px rgba(255,201,77,0.25)}
+.cls h3{font-size:11px; color:var(--neon2); margin-bottom:8px}
+.cls p{font-size:12px; color:var(--text2)}
+.cls .plus{color:var(--green)} .cls .minus{color:var(--red)}
+.cls.locked{opacity:0.45; cursor:not-allowed}
+.meta-line{font-size:12px; color:var(--text2); margin-top:10px}
+
+.btn{display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  background:var(--panel2); color:var(--text); border:2px solid var(--line); border-radius:10px;
+  padding:11px 16px; font-size:14px; font-weight:700; box-shadow:0 3px 0 var(--ink); min-height:44px}
+.btn:hover{border-color:var(--neon)}
+.btn:active{transform:translateY(2px); box-shadow:0 1px 0 var(--ink)}
+.btn.primary{background:linear-gradient(135deg,var(--neon2),var(--neon)); color:#2b1605; border-color:var(--ink)}
+.btn:disabled{opacity:0.38; cursor:not-allowed; transform:none}
+.btn.big{font-family:'Press Start 2P'; font-size:13px; padding:16px 26px}
+
+/* ─── комната ─────────────────────────────────────────────────────── */
+.room{position:relative; background:linear-gradient(180deg,#10151d 0%,#0c1016 70%,#080b0f 100%);
+  border:2px solid var(--line); border-radius:12px; box-shadow:0 4px 0 var(--ink);
+  padding:12px; overflow:hidden}
+.room::before{content:''; position:absolute; inset:0; pointer-events:none;
+  background:radial-gradient(ellipse 60% 40% at 78% 18%, rgba(255,138,42,0.13), transparent 70%)}
+.scene{display:flex; gap:10px; align-items:flex-end; justify-content:space-between; min-height:96px; position:relative}
+.win{width:120px; height:84px; background:#05070c; border:3px solid #222b38; border-radius:4px; position:relative; overflow:hidden; flex:none}
+.win .neon{position:absolute; inset:auto 8px 10px 8px; text-align:center; font-family:'Press Start 2P'; font-size:8px;
+  color:var(--neon); text-shadow:0 0 8px var(--neon), 0 0 18px var(--neon)}
+.win .neon.off{color:#3a2a1c; text-shadow:none}
+@keyframes neonblink{0%,100%{opacity:1}84%{opacity:1}86%{opacity:0.2}88%{opacity:1}93%{opacity:0.55}95%{opacity:1}}
+body.on .win .neon:not(.off){animation:neonblink 4.5s infinite}
+.win .moon{position:absolute; top:8px; right:12px; width:14px; height:14px; border-radius:50%; background:#cfd8e2; box-shadow:0 0 10px rgba(207,216,226,0.5)}
+.scratches{font-family:'Press Start 2P'; font-size:9px; color:#3d4a5c; letter-spacing:2px; user-select:none}
+.deskcat{color:var(--text2); font-size:11px; text-align:right}
+.combo-banner{display:none; margin:10px 0 0; padding:8px 12px; border:2px solid var(--gold); border-radius:8px;
+  background:rgba(255,205,60,0.08); color:var(--gold); font-family:'Press Start 2P'; font-size:10px; text-align:center}
+.combo-banner.on{display:block}
+@keyframes skesflash{0%{opacity:0.95}100%{opacity:0}}
+#flash{position:fixed; inset:0; background:radial-gradient(circle,#ffd23c 0%,#ff8a2a 45%,transparent 75%); z-index:80; pointer-events:none; opacity:0; display:none}
+#flash.go{display:block; animation:skesflash 0.9s ease-out forwards}
+@media (prefers-reduced-motion:reduce){ #flash{display:none!important} }
+
+.actions{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:9px; margin-top:12px}
+.act{display:flex; flex-direction:column; align-items:flex-start; gap:3px; text-align:left;
+  background:var(--panel2); border:2px solid var(--line); border-radius:10px; padding:10px 12px;
+  color:var(--text); box-shadow:0 3px 0 var(--ink); min-height:64px}
+.act:hover:not(:disabled){border-color:var(--neon)}
+.act:active:not(:disabled){transform:translateY(2px); box-shadow:0 1px 0 var(--ink)}
+.act:disabled{opacity:0.38; cursor:not-allowed}
+.act .t{font-weight:900; font-size:13.5px; display:flex; gap:7px; align-items:center}
+.act .t i{color:var(--neon); font-size:17px}
+.act .s{font-size:11px; color:var(--text2)}
+.act.hot .t i{color:var(--gold)}
+
+#log{margin-top:12px; background:var(--panel2); border:2px solid var(--line); border-radius:10px;
+  padding:10px 12px; font-size:12.5px; color:var(--text2); max-height:148px; overflow-y:auto}
+#log div{padding:2px 0; border-bottom:1px dashed #1d2530}
+#log div:first-child{color:var(--text)}
+#log b{color:var(--neon2)}
+
+/* ─── модалки ─────────────────────────────────────────────────────── */
+.overlay{display:none; position:fixed; inset:0; background:rgba(3,5,8,0.82); z-index:100;
+  align-items:center; justify-content:center; padding:14px}
+.overlay.on{display:flex}
+.modal{background:var(--panel); border:2px solid var(--line); border-radius:14px; box-shadow:0 6px 0 var(--ink);
+  width:100%; max-width:480px; max-height:88vh; overflow-y:auto; padding:16px}
+.modal h2{font-size:13px; color:var(--neon2); margin-bottom:12px}
+.items{display:flex; flex-direction:column; gap:8px}
+.item{display:flex; gap:10px; align-items:center; background:var(--panel2); border:2px solid var(--line);
+  border-radius:10px; padding:9px 11px; text-align:left; color:var(--text); width:100%}
+.item:hover{border-color:var(--neon)}
+.item img{width:38px; height:38px; object-fit:contain; image-rendering:pixelated; background:#0a0d12; border-radius:6px; flex:none}
+.item .ph{width:38px; height:38px; display:flex; align-items:center; justify-content:center; font-size:22px; color:var(--text2);
+  background:#0a0d12; border-radius:6px; flex:none}
+.item .nm{font-weight:900; font-size:13px}
+.item .st{font-size:11px; color:var(--text2)}
+.item .tier{margin-left:auto; flex:none; font-family:'Press Start 2P'; font-size:12px; padding:5px 7px;
+  border-radius:6px; border:2px solid currentColor}
+.t-S{color:var(--gold); text-shadow:0 0 8px rgba(255,205,60,0.7)} .t-A{color:var(--purple)}
+.t-B{color:var(--blue)} .t-C{color:var(--green)} .t-D{color:#8a8478}
+.item .price{margin-left:auto; flex:none; font-family:'Press Start 2P'; font-size:11px; color:var(--neon2)}
+.item.studied{border-style:dashed; border-color:#3f5a3a}
+.badge{font-size:10px; border:1px solid var(--line); border-radius:5px; padding:1px 5px; color:var(--text2)}
+.badge.rev{color:var(--green); border-color:var(--green)}
+.mod-close{margin-top:12px; width:100%}
+
+/* QTE */
+#qte-canvas{width:100%; height:120px; background:#050b07; border:2px solid #1c3a24; border-radius:8px; display:block}
+#qte-tap{width:100%; margin-top:12px; font-family:'Press Start 2P'; font-size:14px; padding:22px; user-select:none}
+#qte-hits{font-family:'Press Start 2P'; font-size:11px; margin-top:10px; text-align:center; letter-spacing:4px}
+
+/* ларёк */
+.shop-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px}
+.shop-head h2{font-size:13px; color:var(--neon)}
+.who{font-size:10.5px; color:var(--text2)}
+
+/* дедлайн / чек */
+.slotres{font-family:'Press Start 2P'; font-size:clamp(15px,5vw,26px); text-align:center; padding:22px 0; letter-spacing:2px}
+.slotres.ok{color:var(--green); text-shadow:0 0 18px rgba(125,216,95,0.5)}
+.slotres.bad{color:var(--red); text-shadow:0 0 18px rgba(255,77,94,0.5)}
+.receipt{background:#f2ecdc; color:#211c14; font-family:'Courier New',monospace; font-weight:700;
+  max-width:340px; margin:0 auto; padding:18px 16px 26px; font-size:13px;
+  box-shadow:0 8px 24px rgba(0,0,0,0.6);
+  -webkit-mask:linear-gradient(#000 0 0) padding-box; clip-path:polygon(0 0,100% 0,100% 98%,96% 100%,90% 98%,84% 100%,78% 98%,72% 100%,66% 98%,60% 100%,54% 98%,48% 100%,42% 98%,36% 100%,30% 98%,24% 100%,18% 98%,12% 100%,6% 98%,0 100%)}
+.receipt .rc-h{text-align:center; font-size:14px; letter-spacing:1px; margin-bottom:6px}
+.receipt hr{border:none; border-top:2px dashed #8b8064; margin:8px 0}
+.receipt .row{display:flex; justify-content:space-between; gap:8px}
+.receipt .tot{font-size:15px}
+.hatch-anim{font-family:'Press Start 2P'; text-align:center; color:var(--red); font-size:14px; padding:40px 0}
+.center{text-align:center}
+.mt{margin-top:14px}
+.toast{position:fixed; left:50%; bottom:20px; transform:translateX(-50%) translateY(80px); z-index:120;
+  background:var(--ink); border:2px solid var(--neon); color:var(--text); border-radius:10px; padding:10px 16px;
+  font-size:13px; max-width:90vw; transition:transform 0.25s; text-align:center}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.stat-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}
+.stat-tags span{font-size:10px;background:#0a0d12;border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--text2)}
+</style>
+</head>
+<body class="on">
+<div id="crt"></div>
+<div id="flash"></div>
+
+<div id="app">
+
+<!-- HUD -->
+<div id="hud">
+  <div class="hud-row">
+    <div class="hud-box" id="hud-clock"><div class="lbl">Часы</div><div class="val" id="h-clock">22:00</div></div>
+    <div class="hud-box"><div class="lbl">Ночь</div><div class="val" id="h-night">1/15</div></div>
+    <div class="hud-box" id="hud-quota"><div class="lbl" id="h-quota-l">Дедлайн 1</div><div class="val" id="h-quota">0/60</div></div>
+    <div class="hud-box"><div class="lbl">Деньги</div><div class="val" id="h-money">0₽</div></div>
+    <div class="hud-box"><div class="lbl">Лайки</div><div class="val" id="h-likes" style="color:var(--blue)">0</div></div>
+  </div>
+  <div class="hud-row" style="margin-top:8px">
+    <div class="hud-box" id="box-bod"><div class="lbl">⚡ Бодрость</div>
+      <div class="dial"><div class="arc"></div><div class="needle" id="d-bod"></div><div class="pin"></div><div class="dial-num" id="n-bod">10</div></div></div>
+    <div class="hud-box" id="box-nerv"><div class="lbl">😬 Нервы</div>
+      <div class="dial"><div class="arc"></div><div class="needle" id="d-nerv"></div><div class="pin"></div><div class="dial-num" id="n-nerv">0</div></div></div>
+    <div class="hud-box" style="flex:2;min-width:200px"><div class="lbl">Тело (не лечится деньгами)</div>
+      <div class="lcd heart"><i class="ti ti-heart"></i><div class="bar"><div class="fill" id="b-heart"></div></div><div class="num" id="v-heart">0</div></div>
+      <div class="lcd tar"><i class="ti ti-lungs"></i><div class="bar"><div class="fill" id="b-tar"></div></div><div class="num" id="v-tar">0</div></div>
+      <div class="lcd psy"><i class="ti ti-brain"></i><div class="bar"><div class="fill" id="b-psy"></div></div><div class="num" id="v-psy">0</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ТИТУЛ -->
+<div class="scr on" id="scr-title">
+  <h1 class="logo">СКЕС МАШИНА<small>НОЧНАЯ СМЕНА</small></h1>
+  <div class="age">18+</div>
+  <p class="tone">Игра не романтизирует стимуляторы — она честно ведёт счёт, сколько тела ты обменял на дедлайн. В конце каждого рана — чек. Ночные события и брелоки — из лора тг-канала «Скес машина».</p>
+  <p class="tone" id="pool-note" style="color:var(--text2)">Загружаю банки из обзоров «Скес машины»…</p>
+  <div class="classes" id="class-list"></div>
+  <button class="btn primary big" id="btn-start" onclick="startRun()"><i class="ti ti-moon"></i> В НОЧЬ</button>
+  <div class="meta-line" id="meta-line"></div>
+  <p class="tone mt"><a href="/">← на сайт «Скес машины»</a></p>
+</div>
+
+<!-- КОМНАТА -->
+<div class="scr" id="scr-room">
+  <div class="room">
+    <div class="scene">
+      <div class="win"><div class="moon"></div><div class="neon" id="neon">ЛАРЁК<br>24/7</div></div>
+      <div style="flex:1">
+        <div class="scratches" id="scratches">|</div>
+        <div class="deskcat" id="night-note"></div>
+      </div>
+    </div>
+    <div class="combo-banner" id="combo-banner"></div>
+    <div class="actions" id="actions"></div>
+  </div>
+  <div id="log"></div>
+</div>
+
+<!-- ЛАРЁК -->
+<div class="scr" id="scr-shop">
+  <div class="panel">
+    <div class="shop-head">
+      <h2><i class="ti ti-building-store"></i> ЛАРЁК 24/7</h2>
+      <div><button class="btn" id="btn-reroll" onclick="rerollShop()"></button></div>
+    </div>
+    <div class="items" id="shop-items"></div>
+    <button class="btn primary mod-close" onclick="leaveShop()"><i class="ti ti-door-exit"></i> Вернуться в комнату</button>
+  </div>
+</div>
+
+<!-- УТРО -->
+<div class="scr" id="scr-morning">
+  <div class="panel center">
+    <h2 class="px" style="font-size:14px;color:var(--neon2)" id="mo-title">УТРО</h2>
+    <div id="mo-body" style="margin-top:12px;font-size:13.5px;color:var(--text2);text-align:left"></div>
+    <button class="btn primary big mt" id="mo-next" onclick="morningNext()">Дальше</button>
+  </div>
+</div>
+
+<!-- ДЕДЛАЙН -->
+<div class="scr" id="scr-deadline">
+  <div class="panel center">
+    <h2 class="px" style="font-size:13px;color:var(--blue)" id="dl-title">ДЕДЛАЙН</h2>
+    <div class="slotres" id="dl-slot">— — —</div>
+    <div id="dl-body" style="font-size:13.5px;color:var(--text2)"></div>
+    <div class="mt" id="dl-btns"></div>
+  </div>
+</div>
+
+<!-- ЛЮК -->
+<div class="scr" id="scr-hatch">
+  <div class="panel">
+    <div class="hatch-anim">РЕШЁТКА ПОД СТОЛОМ<br>ОТКРЫВАЕТСЯ<br><br>▼ ▼ ▼</div>
+    <div class="center"><button class="btn primary big" onclick="showReceipt()">Чек</button></div>
+  </div>
+</div>
+
+<!-- ЧЕК -->
+<div class="scr" id="scr-receipt">
+  <div class="receipt" id="receipt"></div>
+  <div class="center mt">
+    <button class="btn primary big" onclick="backToTitle()"><i class="ti ti-rotate"></i> Ещё ран</button>
+  </div>
+</div>
+
+</div><!-- /app -->
+
+<!-- Модалка выбора предмета (холодильник / пепельница / обзор / награда) -->
+<div class="overlay" id="pick-overlay">
+  <div class="modal">
+    <h2 id="pick-title"></h2>
+    <div class="items" id="pick-items"></div>
+    <button class="btn mod-close" onclick="closePick()">Закрыть</button>
+  </div>
+</div>
+
+<!-- QTE: приступ тахикардии -->
+<div class="overlay" id="qte-overlay">
+  <div class="modal">
+    <h2 style="color:var(--red)">ПРИСТУП ТАХИКАРДИИ</h2>
+    <p style="font-size:12.5px;color:var(--text2);margin-bottom:10px">Тапай в ритм ударов сердца. 8 ударов, нужно попасть минимум в 6.</p>
+    <canvas id="qte-canvas" width="440" height="120"></canvas>
+    <div id="qte-hits">········</div>
+    <button class="btn primary" id="qte-tap">ТАП</button>
+  </div>
+</div>
+
+<!-- Результат обзора -->
+<div class="overlay" id="rev-overlay">
+  <div class="modal">
+    <h2 style="color:var(--blue)"><i class="ti ti-pencil-bolt"></i> ОБЗОР ОПУБЛИКОВАН</h2>
+    <div id="rev-body" style="font-size:13.5px"></div>
+    <button class="btn primary mod-close" onclick="hide('rev-overlay')">Заебись</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+/* ══════════════════════════════════════════════════════════════════
+   СКЕС МАШИНА: НОЧНАЯ СМЕНА — пошаговый рогалик по GDD v0.1.
+   Предметы-энергетики берутся из реальных обзоров сайта (Supabase),
+   сигареты — из локального пула. Всё состояние — в объекте S.
+   ══════════════════════════════════════════════════════════════════ */
+
+// ─── Supabase: тот же проект, что у сайта (anon key публичен, RLS) ──
+const SB_URL='https://uckwmceuwjzjbawermgd.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVja3dtY2V1d2p6amJhd2VybWdkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzEwMDMsImV4cCI6MjA5NjY0NzAwM30.qUMofMOB_X_m894ss1zkKDpqCI6x73U4cJoYxy_WiHY';
+
+// ─── маппинг обзоров сайта → статы банок (портировано из index.html) ─
+// значения хранятся как 200+v (новый формат), 100+v (биполярки), <100 (древние)
+function bpVal(raw){ if(raw==null) return 10; raw=Number(raw); return raw>=100 ? raw-100 : raw*2; }
+function monoVal(key, raw){
+  if(raw==null) return 0;
+  raw=Number(raw);
+  if(raw>=200) return Math.min(10, raw-200);
+  if(key==='tahikardia') return Math.min(10, Math.max(0, raw>=100 ? Math.abs(raw-110)/2 : raw));
+  return Math.abs(bpVal(raw)-10);
+}
+function togglesOf(raw){ raw=Number(raw||0); return raw>=200 ? (raw-200)&3 : 0; }
+const P_W={p1:30,p2:25,p3:15,p4:15,tahikardia:15};
+function calcScore(r){
+  let base=0; for(const k in P_W) base+=monoVal(k,r[k])*P_W[k];
+  base/=100;
+  const m=togglesOf(r.tremor);
+  return Math.round(base*(1+0.1*(((m&1)?1:0)+((m&2)?1:0)))*100)/100;
+}
+function letterOf(score){ return score<=2?'D' : score<=4?'C' : score<=6?'B' : score<=8?'A' : 'S'; }
+
+const TIER_MULT={D:0.8,C:1.0,B:1.15,A:1.3,S:1.5};
+const TIER_HEART={D:0,C:1,B:2,A:3,S:5};
+const TIER_PRICE={D:60,C:100,B:160,A:250,S:400};
+const TIER_IDX={D:0,C:1,B:2,A:3,S:4};
+
+// ─── пул банок: запасной вариант, если база недоступна ──────────────
+const FALLBACK_CANS=[
+  {name:'Flash Up Energy', by:'ларёк', p1:3,p2:5,p3:6,p4:1,depr:6,tach:1,trem:0,tier:'D'},
+  {name:'Горилла классик', by:'ларёк', p1:5,p2:6,p3:4,p4:3,depr:4,tach:0,trem:0,tier:'C'},
+  {name:'Адреналин Раш',   by:'ларёк', p1:6,p2:5,p3:3,p4:4,depr:3,tach:1,trem:0,tier:'B'},
+  {name:'Вольт черника',   by:'ларёк', p1:5,p2:4,p3:5,p4:2,depr:5,tach:0,trem:1,tier:'C'},
+  {name:'Бёрн тропик',     by:'ларёк', p1:7,p2:7,p3:4,p4:5,depr:3,tach:1,trem:0,tier:'A'},
+  {name:'Драйв Ми лайм',   by:'ларёк', p1:4,p2:4,p3:6,p4:2,depr:5,tach:0,trem:0,tier:'D'},
+  {name:'Торнадо шторм',   by:'ларёк', p1:6,p2:8,p3:5,p4:3,depr:4,tach:1,trem:1,tier:'B'},
+  {name:'Энергос за 325 рублей', by:'скес', p1:8,p2:6,p3:2,p4:8,depr:2,tach:1,trem:0,tier:'S'},
+];
+
+// ─── ночные события: мемы и лор тг-канала «Скес машина» ─────────────
+// раз за ночь, в случайный час; выбор — через ту же модалку предметов
+const EVENTS=[
+  {id:'gavrila', title:'⚡ УЧЕБНАЯ ТРЕВОГА', text:'Кажется, Гаврила поебался… ЭТО НЕУЧЕНИЕ! Всем приготовиться к расслоению материи и пространства.',
+    choices:[{label:'Ликовать со всей тусовкой', sub:'+2 ⚡, −2 😬', fx:()=>{ S.bod=clamp(S.bod+2,0,S.bodMax); S.nerv=clamp(S.nerv-2,0,10); }}]},
+  {id:'kachalka', title:'ГАВРИЛА НА СВЯЗИ', text:'Гаврила приказал через 20 минут быть в качалке. Ну хуле поделать.',
+    choices:[
+      {label:'жимприседтягажимприседтяга', sub:'−1 ч, −3 😬', fx:()=>{ advance(2); S.nerv=clamp(S.nerv-3,0,10); }},
+      {label:'«Я занят» (отстоять личные границы)', sub:'+2 🧠', fx:()=>{ S.psyche=clamp(S.psyche+2,0,100); }}]},
+  {id:'omar', title:'МЧС ПРЕДУПРЕЖДАЕТ', text:'Муминов Омар начал бухать страшно. Возможны звонки с признанием любви. …Звонит.',
+    choices:[{label:'Выслушать признание', sub:'−30 мин, −2 😬', fx:()=>{ advance(1); S.nerv=clamp(S.nerv-2,0,10); }}]},
+  {id:'koksh', title:'ВК ЛЁГ', text:'Кокш, ты нахуя ВК опять положил? Интернет прилёг вместе с ним.',
+    choices:[{label:'Ждать и смотреть в стену', sub:'−30 мин', fx:()=>{ advance(1); }}]},
+  {id:'mark', title:'БАЗА ОТ МАРКА', text:'В чат упал лонгрид. База от Марка на связи. Не прочитать нельзя.',
+    choices:[{label:'Прочитать всю базу', sub:'−30 мин, −3 😬', fx:()=>{ advance(1); S.nerv=clamp(S.nerv-3,0,10); }}]},
+  {id:'dacha', title:'ОБЩИЙ СБОР', text:'Пацаны, общий сбор через час на даче с телками. Адрес: с. Рофляново, ул. Пушкина, д. Колотушкина.',
+    choices:[
+      {label:'Поехать', sub:'−3 ч, −4 😬, −6 🧠', fx:()=>{ advance(6); S.nerv=clamp(S.nerv-4,0,10); S.psyche=clamp(S.psyche-6,0,100); }},
+      {label:'«Какая дача, такие и телки»', sub:'+1 😬', fx:()=>{ S.nerv=clamp(S.nerv+1,0,10); }}]},
+  {id:'bassuha', title:'БАССУХА', text:'Сосед врубил дробящую кости бассуху. ПК прилёг. Пора вести счёт.',
+    choices:[{label:'Перезагрузить всё', sub:'−30 мин, +1 😬', fx:()=>{ advance(1); S.nerv=clamp(S.nerv+1,0,10); }}]},
+  {id:'kartel', title:'КАРТЕЛЬ НА СВЯЗИ', text:'Мексиканский картель поставил тебя на счётчик: минимум 10 лайков, иначе минус конечность.',
+    choices:[{label:'Показать статистику', sub:'есть 10 👍 → −2 🧠, нет → +3 🧠', fx:()=>{
+      if(S.likes>=10){ S.psyche=clamp(S.psyche-2,0,100); log('Картель доволен цифрами. Конечности целы. −2 🧠'); }
+      else{ S.psyche=clamp(S.psyche+3,0,100); log('Лайков мало. Картель недоволен. +3 🧠'); } }}]},
+  {id:'shiza', title:'АРМИЯ ШИЗОВ', text:'Опрос в тгк: «Есть ли у вас внутренний монолог?» Ты залип, отвечая развёрнуто.',
+    choices:[{label:'Перейти на гуморальную регуляцию', sub:'−30 мин, −1 🧠', fx:()=>{ advance(1); S.psyche=clamp(S.psyche-1,0,100); }}]},
+  {id:'elf', title:'ЗА ОКНОМ', text:'Ты видел эльфа у ларька, нахуй. И червя огромного.', minPsy:60,
+    choices:[{label:'Теперь я знаю правду', sub:'+3 🧠', fx:()=>{ S.psyche=clamp(S.psyche+3,0,100); }}]},
+];
+
+// ─── пул курева: на сайте обзоров на сиги нет — локальный пул по GDD ─
+// p1 сексуальность, skes скесность, der деручесть, noble благородность,
+// dizzy головокружность; vape=электронка (Смолы меньше, −Нервы на треть слабее)
+const SMOKES=[
+  {key:'sm1', name:'Ларёчная без фильтра', tier:'D', p1:2,skes:4,der:8,noble:0,dizzy:6,vape:false,uses:5},
+  {key:'sm2', name:'Красно-белые компакт', tier:'C', p1:5,skes:5,der:5,noble:2,dizzy:3,vape:false,uses:5},
+  {key:'sm3', name:'Синий честер',         tier:'C', p1:4,skes:6,der:4,noble:2,dizzy:2,vape:false,uses:5},
+  {key:'sm4', name:'Парла аква вкусная',   tier:'B', p1:7,skes:5,der:3,noble:6,dizzy:2,vape:false,uses:5},
+  {key:'sm5', name:'Чёрное собрание',      tier:'A', p1:8,skes:6,der:4,noble:9,dizzy:3,vape:false,uses:5},
+  {key:'sm6', name:'Электронка клубника-лёд', tier:'C', p1:6,skes:4,der:3,noble:1,dizzy:4,vape:true,uses:8},
+  {key:'sm7', name:'Электронка табачная 50мг',tier:'B', p1:5,skes:7,der:5,noble:2,dizzy:7,vape:true,uses:8},
+  {key:'sm8', name:'Самокрутка деда',      tier:'B', p1:3,skes:8,der:9,noble:4,dizzy:8,vape:false,uses:5},
+];
+
+// ─── брелоки (пассивки), 5 слотов ────────────────────────────────────
+const TRINKETS=[
+  {id:'filter',   name:'Фильтр',            r:'C', desc:'−2 Смолы с каждой сигареты'},
+  {id:'water',    name:'Кружка воды',       r:'C', desc:'Рыгучесть игнорируется'},
+  {id:'validol',  name:'Валидол',           r:'B', desc:'1 бесплатный сброс проверки Тахикардии за дедлайн'},
+  {id:'phonk',    name:'Плейлист «фонк»',   r:'B', desc:'Работа после 03:00 не даёт Нервов'},
+  {id:'earplugs', name:'Беруши',            r:'C', desc:'Срыв не отнимает блок работы'},
+  {id:'luckybutt',name:'Счастливый бычок',  r:'A', desc:'Первое комбо ночи не бросает по Смоле'},
+  {id:'talisman', name:'Банка-талисман',    r:'A', desc:'Энергетики тира S: Сердце ×0.7'},
+  {id:'ashtray',  name:'Пепельница деда',   r:'B', desc:'Каждая 5-я сигарета — «та самая»: −Нервы ×2'},
+  {id:'zerozhizha',name:'Жижа 0 мг',        r:'B', desc:'Электронки: без Смолы, но −Нервы вдвое слабее'},
+  {id:'casino',   name:'Будильник-казино',  r:'C', desc:'Сон 2 ч вместо 3, но 20% шанс проспать час'},
+  {id:'key',      name:'Ключ от ларька',    r:'A', desc:'Ларёк открыт и в ночь дедлайна'},
+  {id:'redcan',   name:'Красная банка',     r:'S', desc:'Банки +50% Бодрости, но проверки Сердца на 10% злее'},
+  {id:'irony',    name:'Ирония',            r:'S', desc:'Психика 60+ даёт +15% к работе вместо помех'},
+  {id:'bluecheck',name:'Синяя галочка',     r:'A', desc:'Обзоры приносят ×1.5 лайков'},
+  {id:'thread',   name:'Тред-огонёк',       r:'B', desc:'После обзора следующий блок работы +25% (на волне хайпа)'},
+  // ─── брелоки-мемы из тг-канала «Скес машина» ───
+  {id:'cap',      name:'Кепка задом наперёд',r:'C', desc:'10% шанс, что любой негативный бросок — наёбка (игнорируется)'},
+  {id:'eblan',    name:'Ботинки EBLAN',     r:'B', desc:'Стрит кредабилити: лайки за обзоры +25%'},
+  {id:'klod',     name:'Пачка клода',       r:'A', desc:'Раз за ночь предотвращает срыв — всё не так уж плохо на сегодняшний день'},
+  {id:'tvorog',   name:'Творог Гаврилы',    r:'C', desc:'Общий сбор творога: сон даёт +2 ⚡ дополнительно'},
+  {id:'creatine', name:'Креатин',           r:'B', desc:'+1 к максимуму Бодрости (опасная металлоконструкция)'},
+  {id:'mukhomor', name:'Водка с мухоморами',r:'S', desc:'Каждый блок работы: выработка ×0.5–×2.5 наугад'},
+];
+const TRINKET_PRICE={C:120,B:200,A:320,S:500};
+
+const QUOTAS=[60,90,130,180,250];
+const REWARDS=[800,1100,1500,2000,0];
+const NIGHT_TICKS=20;                 // 22:00 → 08:00 половинками часа
+
+const CLASSES={
+  student:{name:'Студент', plus:'Квоты дедлайнов −15%', minus:'Стартовых денег меньше (400₽)', money:400, bodMax:10},
+  guard:{name:'Сторож', plus:'+2 макс. Бодрости', minus:'Ларёк дороже на 20% (далеко идти)', money:600, bodMax:12, unlockWins:1},
+  free:{name:'Фрилансер', plus:'Раз за ран: перенести до 25% квоты на следующий дедлайн', minus:'Перенесённая квота ×1.5', money:600, bodMax:10, unlockWins:3},
+};
+
+// ─── мета между ранами ───────────────────────────────────────────────
+function loadMeta(){ try{ return JSON.parse(localStorage.getItem('skesnight_meta'))||{}; }catch(e){ return {}; } }
+function saveMeta(m){ localStorage.setItem('skesnight_meta', JSON.stringify(m)); }
+let META=Object.assign({wins:0,runs:0,best:0,album:[]}, loadMeta());
+function albumAdd(key){ if(!META.album.includes(key)){ META.album.push(key); saveMeta(META); } }
+
+// ─── состояние рана ──────────────────────────────────────────────────
+let CANS=[];            // пул банок (из базы или fallback)
+let S=null;             // состояние текущего рана
+let chosenClass='student';
+
+const $=id=>document.getElementById(id);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const r1=v=>Math.round(v*10)/10;
+const rnd=Math.random;
+function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+let toastTimer=null;
+function toast(msg,ms=2800){
+  const t=$('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),ms);
+}
+function show(id){ $(id).classList.add('on'); }
+function hide(id){ $(id).classList.remove('on'); }
+function screen(id){
+  document.querySelectorAll('.scr').forEach(s=>s.classList.remove('on'));
+  show(id);
+  document.body.classList.toggle('playing', id!=='scr-title' && id!=='scr-receipt');
+  window.scrollTo(0,0);
+}
+
+// ─── загрузка банок из обзоров сайта ─────────────────────────────────
+async function loadCans(){
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/reviews?select=id,drink_name,username,photo_url,p1,p2,p3,p4,tahikardia,tremor&order=created_at.desc&limit=500',
+      {headers:{apikey:SB_KEY, authorization:'Bearer '+SB_KEY}});
+    if(!r.ok) throw new Error('http '+r.status);
+    const rows=await r.json();
+    const seen=new Set(); const out=[];
+    for(const row of rows){
+      const name=String(row.drink_name||'').trim(); if(!name) continue;
+      const norm=name.toLowerCase().replace(/[^a-zа-яё0-9]+/g,' ').trim();
+      if(seen.has(norm)) continue; seen.add(norm);
+      const score=calcScore(row); const tog=togglesOf(row.tremor);
+      out.push({
+        name, by:row.username||'аноним', photo:row.photo_url||null,
+        p1:monoVal('p1',row.p1), p2:monoVal('p2',row.p2), p3:monoVal('p3',row.p3),
+        p4:monoVal('p4',row.p4), depr:monoVal('tahikardia',row.tahikardia),
+        tach:(tog&1)?1:0, trem:(tog&2)?1:0, tier:letterOf(score),
+      });
+    }
+    if(out.length>=4){ CANS=out; $('pool-note').textContent='В пуле '+out.length+' банок из реальных обзоров тусовки. Каждый обзор на сайте = предмет здесь.'; return; }
+    throw new Error('мало обзоров');
+  }catch(e){
+    CANS=FALLBACK_CANS.slice();
+    $('pool-note').textContent='База обзоров недоступна — играем на запасном ассортименте ларька ('+CANS.length+' банок).';
+  }
+}
+
+function canKey(c){ return 'can:'+c.name.toLowerCase(); }
+function smokeKey(s){ return 'smoke:'+s.name.toLowerCase(); }
+
+// ─── титульный экран ─────────────────────────────────────────────────
+function renderTitle(){
+  const list=$('class-list'); list.innerHTML='';
+  for(const id in CLASSES){
+    const c=CLASSES[id];
+    const locked=c.unlockWins && META.wins<c.unlockWins;
+    const b=document.createElement('button');
+    b.className='cls'+(locked?' locked':'')+(id===chosenClass?' sel':'');
+    b.innerHTML='<h3>'+c.name+(locked?' 🔒':'')+'</h3>'
+      +'<p class="plus">+ '+c.plus+'</p><p class="minus">− '+c.minus+'</p>'
+      +(locked?'<p style="font-size:11px;margin-top:6px">Открывается за '+c.unlockWins+'-ю победу</p>':'');
+    b.onclick=()=>{ if(locked){ toast('Сначала выживи: нужно побед — '+c.unlockWins); return; } chosenClass=id; renderTitle(); };
+    list.appendChild(b);
+  }
+  $('meta-line').textContent='Ранов: '+META.runs+' · Побед: '+META.wins+' · Рекорд: '+META.best+' очк. · Альбом: '+META.album.length+' предм.';
+}
+
+function pickTierWeighted(){
+  const roll=rnd()*100;
+  return roll<30?'D' : roll<65?'C' : roll<85?'B' : roll<97?'A' : 'S';
+}
+function randCanOfTier(tier){
+  const pool=CANS.filter(c=>c.tier===tier);
+  const src=pool.length?pool:CANS;
+  return src[Math.floor(rnd()*src.length)];
+}
+function randSmokeOfTier(tier){
+  const pool=SMOKES.filter(s=>s.tier===tier);
+  const src=pool.length?pool:SMOKES;
+  return src[Math.floor(rnd()*src.length)];
+}
+
+// ─── старт рана ──────────────────────────────────────────────────────
+function startRun(){
+  if(!CANS.length){ toast('Пул предметов ещё грузится…'); return; }
+  const c=CLASSES[chosenClass];
+  if(c.unlockWins && META.wins<c.unlockWins){ toast('Класс закрыт'); return; }
+  META.runs++; saveMeta(META);
+  S={
+    cls:chosenClass, night:1, cycle:0, cycleNight:1, t:0,
+    bodMax:c.bodMax, bod:c.bodMax, nerv:0, money:c.money, likes:0, likesCycle:0,
+    heart:0, tar:0, psyche:0, tarPen:0,
+    work:0, totalWork:0, carriedDebt:0, freeUsed:false, hospitalPardonUsed:false, hospitalTonight:false,
+    fridge:[], smokes:[], trinkets:[],
+    comboWin:0, comboLeft:0, comboMult:1, comboTonight:0, lastCanHeart:0,
+    eventTick:99, eventDone:true, klodTonight:false,
+    nobleBoost:false, threadBoost:false, tremorPending:false,
+    consumedTonight:[], reviewed:{}, studied:{}, morningDepr:0,
+    cigCount:0, validolUsed:false, shopStock:null, ended:false, asleep:false,
+    stats:{cans:0,cigs:0,combos:0,reviews:0,likes:0,slept:0,breakdowns:0,ambulance:0,deadlinesOk:0},
+    log:[],
+  };
+  // стартовый набор: две банки C-тира и пачка попроще
+  S.fridge.push(randCanOfTier('C'), randCanOfTier('C'));
+  const sm=randSmokeOfTier('C'); S.smokes.push({item:sm, uses:sm.uses});
+  S.fridge.forEach(c2=>albumAdd(canKey(c2))); albumAdd(smokeKey(sm));
+  startNight();
+}
+
+function startNight(){
+  S.t=0; S.comboWin=0; S.comboLeft=0; S.comboMult=1; S.comboTonight=0;
+  S.consumedTonight=[]; S.morningDepr=0; S.hospitalTonight=false; S.asleep=false;
+  S.nobleBoost=false; S.threadBoost=false; S.tremorPending=false;
+  S.shopStock=null;
+  S.klodTonight=false;
+  S.eventTick=4+Math.floor(rnd()*10); S.eventDone=false;   // одно событие за ночь
+  log('— НОЧЬ '+S.night+'. Дедлайн '+(S.cycle+1)+' через '+(4-S.cycleNight)+' ноч. Квота: '+quotaLeft()+' ед.');
+  screen('scr-room'); renderRoom();
+}
+
+function effQuota(){
+  const base=Math.round(QUOTAS[S.cycle]*(S.cls==='student'?0.85:1));
+  return base+S.carriedDebt;
+}
+function quotaLeft(){ return Math.max(0, effQuota()-Math.floor(S.work)); }
+function shopOpen(){ return S.cycleNight<3 || S.trinkets.includes('key'); }
+function hourNow(){ return (22+S.t/2)%24; }
+function fmtTime(t){
+  const h=Math.floor((22+t/2)%24), m=(t%2)?'30':'00';
+  return String(h).padStart(2,'0')+':'+m;
+}
+function ticksLeft(){ return NIGHT_TICKS-S.t; }
+function has(id){ return S.trinkets.includes(id); }
+
+function log(msg){
+  S.log.unshift(msg);
+  if(S.log.length>40) S.log.pop();
+  const el=$('log'); el.innerHTML=S.log.map(l=>'<div>'+l+'</div>').join('');
+}
+
+// ─── HUD ─────────────────────────────────────────────────────────────
+function renderHUD(){
+  $('h-clock').textContent=fmtTime(S.t);
+  $('h-night').textContent=S.night+'/15';
+  $('h-quota-l').textContent='Дедлайн '+(S.cycle+1)+' · '+(3-S.cycleNight)+' ноч. после этой';
+  $('h-quota').textContent=Math.floor(S.work)+'/'+effQuota();
+  $('h-money').textContent=S.money+'₽';
+  $('h-likes').textContent=S.likes;
+  $('n-bod').textContent=Math.round(S.bod);
+  $('n-nerv').textContent=Math.round(S.nerv);
+  $('d-bod').style.transform='rotate('+(S.bod/S.bodMax*160-80)+'deg)';
+  $('d-nerv').style.transform='rotate('+(S.nerv/10*160-80)+'deg)';
+  $('box-nerv').classList.toggle('danger', S.nerv>=8);
+  $('box-bod').classList.toggle('danger', S.bod<=2);
+  $('b-heart').style.width=clamp(S.heart,0,100)+'%'; $('v-heart').textContent=Math.round(S.heart);
+  $('b-tar').style.width=clamp(S.tar,0,100)+'%'; $('v-tar').textContent=Math.round(S.tar);
+  $('b-psy').style.width=clamp(S.psyche,0,100)+'%'; $('v-psy').textContent=Math.round(S.psyche);
+  document.body.classList.toggle('pulse50', S.heart>=50 && S.heart<70);
+  document.body.classList.toggle('pulse70', S.heart>=70);
+  document.body.classList.toggle('psycho', S.psyche>=85 && !has('irony'));
+  const cb=$('combo-banner');
+  if(S.comboLeft>0){ cb.classList.add('on'); cb.textContent='★ СКЕС ×'+S.comboMult+' ещё '+(S.comboLeft/2)+' ч ★'; }
+  else if(S.comboWin>0){ cb.classList.add('on'); cb.textContent='окно скеса: '+S.comboWin+' мин — успей покурить'; }
+  else cb.classList.remove('on');
+}
+
+// ─── комната и действия ──────────────────────────────────────────────
+function workMult(){
+  let m=1; const tags=[];
+  if(S.bod>=7){ m*=1.2; tags.push('бодрый ×1.2'); }
+  if(S.nerv>=8){ m*=0.75; tags.push('трясутся руки ×0.75'); }
+  if(S.tremorPending){ m*=0.75; tags.push('тремор ×0.75'); }
+  if(S.comboLeft>0){ m*=S.comboMult; tags.push('СКЕС ×'+S.comboMult); }
+  if(S.nobleBoost){ m*=1.05; tags.push('благородство ×1.05'); }
+  if(S.threadBoost){ m*=1.25; tags.push('хайп ×1.25'); }
+  if(S.psyche>=60 && has('irony')){ m*=1.15; tags.push('ирония ×1.15'); }
+  return {m,tags};
+}
+
+function renderRoom(){
+  renderHUD();
+  $('neon').classList.toggle('off', !shopOpen());
+  $('scratches').textContent='∥'.repeat(Math.ceil(S.night/2))+(S.night%2?'|':'');
+  $('night-note').textContent='Ночь '+S.night+' · '+(S.cycleNight===3?'НОЧЬ ДЕДЛАЙНА':'до дедлайна '+(3-S.cycleNight)+' ноч.')+' · ларёк '+(shopOpen()?'открыт':'закрыт');
+  const A=$('actions'); A.innerHTML='';
+  const wm=workMult();
+  const acts=[
+    {icon:'ti-device-desktop', name:'РАБОТАТЬ', sub:'2 ч · −3 ⚡ · ≈'+Math.round(10*wm.m)+' ед.'+(wm.tags.length?' ('+wm.tags.join(', ')+')':''),
+      dis:ticksLeft()<4?'нет времени':(S.bod<3?'нет бодрости':null), fn:doWork, hot:S.comboLeft>0},
+    {icon:'ti-bottle', name:'ХОЛОДИЛЬНИК', sub:'0 ч · банок: '+S.fridge.length,
+      dis:S.fridge.length?null:'пусто', fn:openFridge},
+    {icon:'ti-smoking', name:'ПОКУРИТЬ', sub:'30 мин · курева: '+S.smokes.reduce((n,s)=>n+s.uses,0),
+      dis:ticksLeft()<1?'нет времени':(S.smokes.length?null:'нечего курить'), fn:openSmokes, hot:S.comboWin>0},
+    {icon:'ti-pencil-bolt', name:'НАПИСАТЬ ОБЗОР', sub:'1 ч · −2 😬 · лайки за свежий предмет',
+      dis:ticksLeft()<2?'нет времени':(reviewables().length?null:'нечего обозревать'), fn:openReview},
+    {icon:'ti-building-store', name:'К ЛАРЬКУ', sub:'1 ч дороги · '+(shopOpen()?'открыт':'ЗАКРЫТ'),
+      dis:ticksLeft()<2?'нет времени':(shopOpen()?null:'закрыт в ночь дедлайна'), fn:goShop},
+    {icon:'ti-bed', name:'ПОСПАТЬ', sub:(has('casino')?'2 ч (казино!)':'3 ч')+' · +6 ⚡ −3 😬 −5 ❤ −3 🧠',
+      dis:ticksLeft()<(has('casino')?4:6)?'нет времени':null, fn:doSleep},
+    {icon:'ti-clock-off', name:'ДОТЕРПЕТЬ ДО УТРА', sub:'закончить ночь', dis:null, fn:()=>endNight(false)},
+  ];
+  // галлюцинация: психика 85+ подсовывает ложную кнопку работы
+  if(S.psyche>=85 && !has('irony') && rnd()<0.35){
+    const pos=1+Math.floor(rnd()*4);
+    acts.splice(pos,0,{icon:'ti-device-desktop', name:'РАБОТАТЬ', sub:'2 ч · −3 ⚡ · ≈'+Math.round(10*wm.m)+' ед.', dis:null, fake:true});
+  }
+  acts.forEach(a=>{
+    const b=document.createElement('button');
+    b.className='act'+(a.hot?' hot':'');
+    b.innerHTML='<span class="t"><i class="ti '+a.icon+'"></i>'+a.name+'</span><span class="s">'+(a.dis?'✕ '+a.dis:a.sub)+'</span>';
+    if(a.dis) b.disabled=true;
+    else b.onclick=a.fake ? ()=>{ advance(1); log('Кнопки не было. Ты полчаса тыкал в пустоту. <b>Психика шалит.</b>'); afterAction(); }
+                          : a.fn;
+    A.appendChild(b);
+  });
+}
+
+// продвижение времени; комбо-окно и длительность скеса тикают вместе с ним
+function advance(ticks){
+  S.t=Math.min(NIGHT_TICKS,S.t+ticks);
+  if(S.comboWin>0) S.comboWin=Math.max(0,S.comboWin-ticks*30);
+  if(S.comboLeft>0){ S.comboLeft=Math.max(0,S.comboLeft-ticks); if(S.comboLeft===0){ S.comboMult=1; log('Скес отпустил.'); } }
+}
+function afterAction(){
+  if(S.ended) return;
+  if(S.bod<=0 && !S.asleep){ S.asleep=true; log('<b>Бодрость на нуле.</b> Ты уснул лицом в клавиатуру.'); endNight(true); return; }
+  if(S.t>=NIGHT_TICKS){ endNight(false); return; }
+  if(!S.eventDone && S.t>=S.eventTick && S.t<NIGHT_TICKS-1){ S.eventDone=true; fireEvent(); return; }
+  renderRoom();
+}
+
+// ─── ночное событие из лора канала ───────────────────────────────────
+function fireEvent(){
+  const pool=EVENTS.filter(e=>!e.minPsy || S.psyche>=e.minPsy);
+  const ev=pool[Math.floor(rnd()*pool.length)];
+  renderRoom();
+  openPick(ev.title, ev.choices.map(c=>({
+    html:'<span class="ph"><i class="ti ti-bolt"></i></span><span><span class="nm">'+esc(c.label)+'</span><br><span class="st">'+esc(ev.text)+(c.sub?' · <b>'+esc(c.sub)+'</b>':'')+'</span></span>',
+    fn:()=>{ closePick(); log('<b>'+esc(ev.title)+':</b> '+esc(ev.text)); c.fx(); afterAction(); },
+  })), true);
+}
+
+// ─── РАБОТА ──────────────────────────────────────────────────────────
+// кепка задом наперёд: 10% шанс, что негативный бросок — наёбка
+function capSave(){
+  if(has('cap') && rnd()<0.1){ log('Обратите внимание на кепку: вас <b>не</b> наебали.'); return true; }
+  return false;
+}
+
+function doWork(){
+  const wm=workMult();
+  let units=r1(10*wm.m);
+  if(has('mukhomor')){
+    const f=Math.round((0.5+rnd()*2)*10)/10;
+    units=r1(units*f);
+    log('Мухомор шепчет: выработка ×'+f+'.');
+  }
+  S.bod=Math.max(0,S.bod-3);
+  const late=hourNow()>=3 && hourNow()<12;
+  // скес: нервы не растут; фонк: работа после 03:00 не даёт нервов
+  const nervGain=(S.comboLeft>0 || (has('phonk') && late))?0:2;
+  S.nerv=clamp(S.nerv+nervGain,0,10);
+  if(S.tremorPending) S.tremorPending=false;
+  if(S.nobleBoost) S.nobleBoost=false;
+  if(S.threadBoost) S.threadBoost=false;
+  advance(4);
+  if(S.nerv>=10 && has('klod') && !S.klodTonight){
+    S.klodTonight=true; S.nerv=7;
+    S.work+=units; S.totalWork+=units;
+    log('Нервы на пределе… но если есть в кармане <b>пачка клода</b> — значит, всё не так уж плохо. Срыв отменён, блок сдан (+'+units+' ед).');
+  }else if(S.nerv>=10){ // срыв
+    S.stats.breakdowns++;
+    const keepBlock=has('earplugs');
+    if(keepBlock){ S.work+=units; S.totalWork+=units; log('СРЫВ! Клавиатура летит в стену… но <b>беруши</b> спасли блок ('+units+' ед). −2 ч, +8 🧠'); }
+    else log('<b>СРЫВ!</b> Блок работы потерян, клавиатура — в стене. Осталось два состояния: блябабубы и бабыбля. −2 ч, +8 🧠');
+    advance(4);
+    S.psyche=clamp(S.psyche+8,0,100);
+    S.nerv=5;
+  }else{
+    S.work+=units; S.totalWork+=units;
+    log('Поработал 2 ч: <b>+'+units+' ед.</b>'+(wm.tags.length?' ('+wm.tags.join(', ')+')':''));
+  }
+  afterAction();
+}
+
+// ─── ХОЛОДИЛЬНИК / БАНКИ ─────────────────────────────────────────────
+function canStatLine(c){
+  return 'секс '+c.p1+' · покур '+c.p2+' · рыг '+c.p3+' · благ '+c.p4+' · депр '+c.depr
+    +(c.tach?' · ⚡тахи':'')+(c.trem?' · ⚡тремор':'');
+}
+function itemRow(html,onclick,cls){
+  const b=document.createElement('button');
+  b.className='item'+(cls?' '+cls:''); b.innerHTML=html; b.onclick=onclick; return b;
+}
+function openFridge(){
+  openPick('ХОЛОДИЛЬНИК — выпить банку (0 ч)', S.fridge.map((c,i)=>({
+    html:(c.photo?'<img src="'+esc(c.photo)+'" alt="">':'<span class="ph"><i class="ti ti-bottle"></i></span>')
+      +'<span><span class="nm">'+esc(c.name)+(S.studied[canKey(c)]?' <span class="badge rev">изучено</span>':'')+'</span><br><span class="st">'+canStatLine(c)+'</span></span>'
+      +'<span class="tier t-'+c.tier+'">'+c.tier+'</span>',
+    cls:S.studied[canKey(c)]?'studied':'',
+    fn:()=>{ closePick(); drinkCan(i); },
+  })));
+}
+function drinkCan(i){
+  const c=S.fridge.splice(i,1)[0];
+  const key=canKey(c);
+  const studied=!!S.studied[key];
+  const tm=TIER_MULT[c.tier];
+  // бодрость
+  let bodGain=Math.min(2+c.p1*0.5,7)*tm;
+  if(has('redcan')) bodGain*=1.5;
+  if(studied) bodGain*=1.15;
+  S.bod=clamp(S.bod+bodGain,0,S.bodMax);
+  // нервы (благородное спокойствие)
+  S.nerv=clamp(S.nerv-c.p4*0.3,0,10);
+  // сердце
+  let heartGain=(6+TIER_HEART[c.tier])*(c.tach?1.5:1);
+  if(c.tier==='S' && has('talisman')) heartGain*=0.7;
+  if(studied) heartGain*=0.8;
+  heartGain=r1(heartGain);
+  S.heart=clamp(S.heart+heartGain,0,100);
+  S.lastCanHeart=heartGain;
+  // окно скеса: покурность × 12 игровых минут; короче сигареты (30 мин) — не окно
+  S.comboWin=c.p2*12>=30?Math.round(c.p2*12):0;
+  // депрессивность — копится к утру
+  S.morningDepr+=c.depr*0.8;
+  // тремор
+  if(c.trem){ S.tremorPending=true; }
+  S.stats.cans++;
+  S.consumedTonight.push({key, at:S.t, name:c.name, tier:c.tier, type:'банка'});
+  log('Выпил «'+esc(c.name)+'» ['+c.tier+']: <b>+'+r1(bodGain)+' ⚡</b>, +'+heartGain+' ❤'
+    +(c.p4?', −'+r1(c.p4*0.3)+' 😬':'')+(c.trem?', тремор!':'')
+    +(S.comboWin>=30?'. Окно скеса: '+S.comboWin+' мин!':'. Банка не покурная — скеса не будет.'));
+  // рыгучесть
+  if(!has('water') && rnd()<c.p3*0.05*(studied?0.5:1) && !capSave()){
+    advance(1); log('<b>Рыгучка.</b> Полчаса потеряны на переговоры с желудком.');
+  }
+  renderHUD();
+  heartCheck(()=>afterAction());
+}
+
+// ─── КУРЕВО ──────────────────────────────────────────────────────────
+function smokeStatLine(s){
+  return (s.vape?'электронка':'сигареты')+' · секс '+s.p1+' · скес '+s.skes+' · деруч '+s.der+' · благ '+s.noble+' · головокр '+s.dizzy;
+}
+function openSmokes(){
+  openPick('ПЕПЕЛЬНИЦА — покурить (30 мин)', S.smokes.map((sl,i)=>({
+    html:'<span class="ph"><i class="ti '+(sl.item.vape?'ti-vector-bezier-circle':'ti-smoking')+'"></i></span>'
+      +'<span><span class="nm">'+esc(sl.item.name)+(S.studied[smokeKey(sl.item)]?' <span class="badge rev">изучено</span>':'')+' <span class="badge">×'+sl.uses+'</span></span><br><span class="st">'+smokeStatLine(sl.item)+'</span></span>'
+      +'<span class="tier t-'+sl.item.tier+'">'+sl.item.tier+'</span>',
+    cls:S.studied[smokeKey(sl.item)]?'studied':'',
+    fn:()=>{ closePick(); doSmoke(i); },
+  })));
+}
+function doSmoke(i){
+  const sl=S.smokes[i]; const s=sl.item; const key=smokeKey(s);
+  const studied=!!S.studied[key];
+  sl.uses--; if(sl.uses<=0) S.smokes.splice(i,1);
+  S.cigCount++; S.stats.cigs++;
+  const inWindow=S.comboWin>=30;
+  advance(1);
+  // нервы
+  let nervDrop=(2+s.p1*0.4)*(s.vape?2/3:1);
+  if(s.vape && has('zerozhizha')) nervDrop*=0.5;
+  if(has('ashtray') && S.cigCount%5===0){ nervDrop*=2; log('«Та самая» — пятая. Пепельница деда одобряет.'); }
+  S.nerv=clamp(S.nerv-nervDrop,0,10);
+  // смола
+  let tarGain=s.vape?(2+s.der/3):(4+s.der/2);
+  if(!s.vape && has('filter')) tarGain=Math.max(0,tarGain-2);
+  if(s.vape && has('zerozhizha')) tarGain=0;
+  if(studied) tarGain*=0.8;
+  tarGain=r1(tarGain);
+  addTar(tarGain);
+  if(s.noble>=4) S.nobleBoost=true;
+  S.consumedTonight.push({key, at:S.t, name:s.name, tier:s.tier, type:s.vape?'электронка':'сигарета'});
+  log('Покурил «'+esc(s.name)+'»: <b>−'+r1(nervDrop)+' 😬</b>, +'+tarGain+' 🫁'+(s.noble>=4?', благородство (+5% след. блок)':''));
+  // головокружность
+  if(rnd()<s.dizzy*0.04*(studied?0.5:1) && !capSave()){ advance(1); log('<b>Поплыл.</b> Полчаса смотрел в стену.'); }
+  // ─── СКЕС ───
+  if(inWindow){
+    S.comboWin=0; S.comboTonight++;
+    const n=Math.min(S.comboTonight,3);
+    S.comboMult=[2,2.5,3][n-1];
+    const rollF=[1.3,1.6,2.0][n-1];
+    S.comboLeft=4; S.stats.combos++;
+    const extraHeart=r1(S.lastCanHeart*(rollF-1));
+    S.heart=clamp(S.heart+extraHeart,0,100);
+    let extraTar=r1(tarGain*(rollF-1));
+    if(has('luckybutt') && S.comboTonight===1){ extraTar=0; }
+    addTar(extraTar);
+    $('flash').classList.remove('go'); void $('flash').offsetWidth; $('flash').classList.add('go');
+    log('<b>★ СКЕС ×'+S.comboMult+' ★</b> Классическая рубрика: энергос с сигаретой. Следующие 2 ч выработка ×'+S.comboMult+', нервы не растут… но тело бросает кости: +'+extraHeart+' ❤, +'+extraTar+' 🫁'+(n>1?' (цепочка ×'+rollF+')':''));
+  }
+  renderHUD();
+  heartCheck(()=>afterAction());
+}
+function addTar(v){
+  S.tar=clamp(S.tar+v,0,100);
+  // каждые 20 смолы — −1 макс. бодрости, необратимо в рамках рана
+  const pen=Math.floor(S.tar/20);
+  if(pen>S.tarPen){
+    const d=pen-S.tarPen; S.tarPen=pen;
+    S.bodMax=Math.max(3,S.bodMax-d); S.bod=Math.min(S.bod,S.bodMax);
+    log('<b>Смола душит:</b> максимум Бодрости −'+d+' (теперь '+S.bodMax+'). Это до конца рана.');
+  }
+}
+
+// ─── ПРОВЕРКА СЕРДЦА / QTE ───────────────────────────────────────────
+function heartCheck(done){
+  if(S.heart>=90){ startQTE(done); return; }
+  if(S.heart>=70){
+    let chance=clamp((S.heart-55)*1.5,5,95);
+    if(has('redcan')) chance+=10;
+    if(rnd()*100<chance && !capSave()){
+      if(has('validol') && !S.validolUsed){
+        S.validolUsed=true; log('Сердце дёрнулось — <b>валидол под язык.</b> Пронесло.');
+        done(); return;
+      }
+      startQTE(done); return;
+    }
+    log('Сердце стучит на '+Math.round(S.heart)+'… пронесло.');
+  }
+  done();
+}
+
+let qte=null;
+function startQTE(done){
+  show('qte-overlay');
+  const cv=$('qte-canvas'); const ctx=cv.getContext('2d');
+  const BEATS=8, INT=800, TOL=170;
+  qte={done, t0:performance.now()+900, hits:new Array(BEATS).fill(null), raf:0};
+  function beatX(i,now){ // позиция удара на канвасе: лента едет влево
+    const dt=(qte.t0+i*INT)-now;
+    return cv.width*0.25 + dt*0.14;
+  }
+  function draw(now){
+    ctx.fillStyle='#050b07'; ctx.fillRect(0,0,cv.width,cv.height);
+    ctx.strokeStyle='#123a1c'; ctx.beginPath(); ctx.moveTo(0,60); ctx.lineTo(cv.width,60); ctx.stroke();
+    // линия «сейчас»
+    ctx.strokeStyle='#7dff6a'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(cv.width*0.25,10); ctx.lineTo(cv.width*0.25,110); ctx.stroke();
+    // спайки-удары
+    for(let i=0;i<BEATS;i++){
+      const x=beatX(i,now); if(x<-30||x>cv.width+30) continue;
+      ctx.strokeStyle=qte.hits[i]===true?'#7dff6a':qte.hits[i]===false?'#ff4d5e':'#e8f7ee'; ctx.lineWidth=3;
+      ctx.beginPath();
+      ctx.moveTo(x-16,60); ctx.lineTo(x-8,60); ctx.lineTo(x-4,26); ctx.lineTo(x+2,92); ctx.lineTo(x+6,60); ctx.lineTo(x+16,60);
+      ctx.stroke();
+    }
+    $('qte-hits').textContent=qte.hits.map(h=>h===true?'♥':h===false?'✕':'·').join(' ');
+    // просроченные мимо
+    for(let i=0;i<BEATS;i++){
+      if(qte.hits[i]===null && now>qte.t0+i*INT+TOL) qte.hits[i]=false;
+    }
+    if(now>qte.t0+(BEATS-1)*INT+TOL+400){ finishQTE(); return; }
+    qte.raf=requestAnimationFrame(draw);
+  }
+  qte.raf=requestAnimationFrame(draw);
+}
+function qteTap(){
+  if(!qte) return;
+  const now=performance.now();
+  const INT=800, TOL=170;
+  for(let i=0;i<8;i++){
+    if(qte.hits[i]!==null) continue;
+    const d=now-(qte.t0+i*INT);
+    if(Math.abs(d)<=TOL){ qte.hits[i]=true; return; }
+    if(d< -TOL) break;
+  }
+}
+function finishQTE(){
+  cancelAnimationFrame(qte.raf);
+  const ok=qte.hits.filter(h=>h===true).length>=6;
+  const done=qte.done; qte=null;
+  hide('qte-overlay');
+  if(ok){
+    S.heart=clamp(S.heart-20,0,100); advance(2);
+    log('<b>Отбил ритм.</b> Отделался испугом: −20 ❤, потерян час.');
+    renderHUD(); done();
+  }else{
+    S.stats.ambulance++;
+    S.money=Math.max(0,S.money-500);
+    S.psyche=clamp(S.psyche+10,0,100);
+    S.hospitalTonight=true;
+    log('<b>СКОРАЯ.</b> Остаток ночи — в приёмном покое. −500₽, +10 🧠');
+    renderHUD();
+    endNight(false, true);
+  }
+}
+$('qte-tap').addEventListener('pointerdown',e=>{ e.preventDefault(); qteTap(); });
+document.addEventListener('keydown',e=>{ if(e.code==='Space' && qte){ e.preventDefault(); qteTap(); } });
+
+// ─── СОН ─────────────────────────────────────────────────────────────
+function doSleep(){
+  let ticks=has('casino')?4:6;
+  let overslept=false;
+  if(has('casino') && rnd()<0.2){ ticks+=2; overslept=true; }
+  advance(Math.min(ticks,ticksLeft()));
+  S.bod=clamp(S.bod+6+(has('tvorog')?2:0),0,S.bodMax);
+  S.nerv=clamp(S.nerv-3,0,10);
+  S.heart=clamp(S.heart-5,0,100);
+  S.psyche=clamp(S.psyche-3,0,100);
+  S.stats.slept++;
+  log('Поспал: +6 ⚡, −3 😬, −5 ❤, −3 🧠. Смолу сон не берёт.'+(overslept?' <b>Будильник-казино проиграл: проспал лишний час.</b>':''));
+  afterAction();
+}
+
+// ─── МЕХАНИКА ОБЗОРОВ (новое поверх GDD) ─────────────────────────────
+// Употребил этой ночью → можешь написать обзор (1 ч): лайки по тиру,
+// свежести и надрыву; предмет становится «изученным» (эффекты лучше,
+// негатив реже); лайки платятся деньгами на дедлайне и жгутся на рероллы.
+function reviewables(){
+  const seen=new Set(); const out=[];
+  for(const c of S.consumedTonight){
+    if(S.reviewed[c.key] || seen.has(c.key)) continue;
+    seen.add(c.key); out.push(c);
+  }
+  return out;
+}
+function openReview(){
+  openPick('НАПИСАТЬ ОБЗОР (1 ч) — что обозреваем?', reviewables().map(c=>({
+    html:'<span class="ph"><i class="ti ti-pencil-bolt"></i></span>'
+      +'<span><span class="nm">'+esc(c.name)+'</span><br><span class="st">'+c.type+' · употреблено в '+fmtTime(c.at)
+      +((S.t-c.at)<=2?' · <b style="color:var(--green)">по горячим следам ×1.5</b>':'')+'</span></span>'
+      +'<span class="tier t-'+c.tier+'">'+c.tier+'</span>',
+    fn:()=>{ closePick(); writeReview(c); },
+  })));
+}
+function writeReview(c){
+  advance(2);
+  S.nerv=clamp(S.nerv-2,0,10);
+  const fresh=(S.t-2-c.at)<=2?1.5:1;   // −2: время уже продвинуто
+  let pain=1;
+  const painTags=[];
+  if(S.nerv>=7){ pain+=0.3; painTags.push('надрыв'); }
+  if(S.psyche>=60){ pain+=0.3; painTags.push('депрессивный лонгрид'); }
+  let likes=(5+TIER_IDX[c.tier]*4)*fresh*pain;
+  if(has('bluecheck')) likes*=1.5;
+  if(has('eblan')) likes*=1.25;
+  likes=Math.max(1,Math.round(likes));
+  S.likes+=likes; S.likesCycle+=likes; S.stats.likes+=likes; S.stats.reviews++;
+  S.reviewed[c.key]=true; S.studied[c.key]=true;
+  if(has('thread')) S.threadBoost=true;
+  const quips=[
+    'Хуйня 👍',
+    'Я рискнул здоровьем ради вас, поэтому ставьте лайки.',
+    '28 звёзд нахуй, лучший обзор современности. P.S. Одну поставил сам.',
+    'Суки, максимальные просмотры. 600 рублей, я напомню.',
+    'Как вы ещё узнаете, каков энергетик на вкус с сигаретой, если не я?',
+    'Такого не было 228 дней.',
+    'В комментах спорят про тир. Значит, зашло.',
+    'Отправлять доклады в комментарии строго в формате .docx, Times New Roman, 14.',
+  ];
+  $('rev-body').innerHTML=
+    '<p>«'+esc(c.name)+'» ['+c.tier+'] — обзор улетел на «Скес машину».</p>'
+    +'<p class="mt"><b style="color:var(--blue)">+'+likes+' лайков</b>'
+    +(fresh>1?' · по горячим следам ×1.5':'')
+    +(painTags.length?' · '+painTags.join(' + '):'')
+    +(has('bluecheck')?' · синяя галочка ×1.5':'')+'</p>'
+    +'<p class="mt">Предмет <b style="color:var(--green)">изучен</b>: эффекты +15%, вред −20%, рыгучка/головокружение вдвое реже.</p>'
+    +'<p class="mt" style="color:var(--text2)">'+quips[Math.floor(rnd()*quips.length)]+'</p>'
+    +'<p class="mt" style="color:var(--text2)">Лайки: на дедлайне 10₽ за лайк, в ларьке реролл за 30 лайков.</p>';
+  show('rev-overlay');
+  log('Написал обзор на «'+esc(c.name)+'»: <b>+'+likes+' 👍</b>, −2 😬, предмет изучен.');
+  afterAction();
+}
+
+// ─── ЛАРЁК ───────────────────────────────────────────────────────────
+function priceMult(){ return S.cls==='guard'?1.2:1; }
+function gainTrinket(id){
+  S.trinkets.push(id); albumAdd('tr:'+id);
+  if(id==='creatine'){ S.bodMax++; log('Креатин: ты опасная металлоконструкция. Макс. Бодрость +1 ('+S.bodMax+').'); }
+}
+function rollStock(){
+  const stock={cans:[],smokes:[],trinket:null};
+  for(let i=0;i<3;i++) stock.cans.push(randCanOfTier(pickTierWeighted()));
+  for(let i=0;i<2;i++) stock.smokes.push(randSmokeOfTier(pickTierWeighted()));
+  const owned=new Set(S.trinkets);
+  let pool=TRINKETS.filter(t=>!owned.has(t.id));
+  // S-брелоки — только после первого «люка» на 4+ дедлайне (мета)
+  if(!META.sUnlocked) pool=pool.filter(t=>t.r!=='S');
+  stock.trinket=pool.length?pool[Math.floor(rnd()*pool.length)]:null;
+  return stock;
+}
+function goShop(){
+  advance(2);
+  if(!S.shopStock) S.shopStock=rollStock();
+  screen('scr-shop'); renderShop();
+}
+function renderShop(){
+  renderHUD();
+  const st=S.shopStock; const box=$('shop-items'); box.innerHTML='';
+  $('btn-reroll').innerHTML='<i class="ti ti-dice-3"></i> Реролл: 100₽ / 30 👍';
+  st.cans.forEach((c,i)=>{
+    const price=Math.round(TIER_PRICE[c.tier]*priceMult());
+    box.appendChild(itemRow(
+      (c.photo?'<img src="'+esc(c.photo)+'" alt="">':'<span class="ph"><i class="ti ti-bottle"></i></span>')
+      +'<span><span class="nm">'+esc(c.name)+' <span class="tier t-'+c.tier+'" style="font-size:9px;padding:2px 4px">'+c.tier+'</span></span>'
+      +'<br><span class="st">'+canStatLine(c)+'</span><br><span class="who">занёс @'+esc(c.by)+'</span></span>'
+      +'<span class="price">'+price+'₽</span>',
+      ()=>{ if(S.money<price){ toast('Не хватает денег'); return; }
+        S.money-=price; S.fridge.push(c); st.cans.splice(i,1); albumAdd(canKey(c));
+        log('Купил «'+esc(c.name)+'» за '+price+'₽.'); renderShop(); }));
+  });
+  st.smokes.forEach((s,i)=>{
+    const price=Math.round(TIER_PRICE[s.tier]*priceMult());
+    box.appendChild(itemRow(
+      '<span class="ph"><i class="ti '+(s.vape?'ti-vector-bezier-circle':'ti-smoking')+'"></i></span>'
+      +'<span><span class="nm">'+esc(s.name)+' <span class="tier t-'+s.tier+'" style="font-size:9px;padding:2px 4px">'+s.tier+'</span> <span class="badge">×'+s.uses+'</span></span>'
+      +'<br><span class="st">'+smokeStatLine(s)+'</span></span>'
+      +'<span class="price">'+price+'₽</span>',
+      ()=>{ if(S.money<price){ toast('Не хватает денег'); return; }
+        S.money-=price; S.smokes.push({item:s,uses:s.uses}); st.smokes.splice(i,1); albumAdd(smokeKey(s));
+        log('Купил «'+esc(s.name)+'» за '+price+'₽.'); renderShop(); }));
+  });
+  if(st.trinket){
+    const t=st.trinket; const price=Math.round(TRINKET_PRICE[t.r]*priceMult());
+    box.appendChild(itemRow(
+      '<span class="ph"><i class="ti ti-key"></i></span>'
+      +'<span><span class="nm">'+esc(t.name)+' <span class="tier t-'+t.r+'" style="font-size:9px;padding:2px 4px">'+t.r+'</span></span><br><span class="st">'+esc(t.desc)+'</span></span>'
+      +'<span class="price">'+price+'₽</span>',
+      ()=>{ if(S.trinkets.length>=5){ toast('Все 5 слотов брелоков заняты'); return; }
+        if(S.money<price){ toast('Не хватает денег'); return; }
+        S.money-=price; gainTrinket(t.id); st.trinket=null;
+        log('Брелок «'+esc(t.name)+'» на связке ('+S.trinkets.length+'/5).'); renderShop(); }));
+  }
+  if(!st.cans.length && !st.smokes.length && !st.trinket){
+    box.innerHTML='<p style="color:var(--text2);font-size:13px">Полки пусты. Реролльни или иди работать.</p>';
+  }
+}
+function rerollShop(){
+  if(S.likes>=30){ S.likes-=30; }
+  else if(S.money>=100){ S.money-=100; }
+  else { toast('Нужно 100₽ или 30 лайков'); return; }
+  S.shopStock=rollStock(); renderShop();
+}
+function leaveShop(){
+  if(S.t>=NIGHT_TICKS){ endNight(false); return; }
+  screen('scr-room'); renderRoom();
+}
+
+// ─── КОНЕЦ НОЧИ / УТРО ───────────────────────────────────────────────
+function endNight(fellAsleep, ambulance){
+  if(S.ended) return;
+  S.t=NIGHT_TICKS;
+  const lines=[];
+  if(fellAsleep) lines.push('Уснул лицом в клавиатуру. Будто не ты спал эти часы, а они спали тебя.');
+  if(ambulance) lines.push('Ночь закончилась в скорой.');
+  // депрессивность банок бьёт утром; психика 60+ удваивает утренние дебаффы
+  if(S.morningDepr>0){
+    const mult=S.psyche>=60?2:1;
+    const dp=r1(S.morningDepr*mult);
+    S.psyche=clamp(S.psyche+dp,0,100);
+    lines.push('Депрессивность выпитого: +'+dp+' 🧠'+(mult>1?' (психика 60+: утро вдвое тяжелее)':''));
+  }
+  // дневной отдых между ночами
+  const clean=S.consumedTonight.length===0;
+  if(clean){
+    S.heart=clamp(S.heart-8,0,100); S.psyche=clamp(S.psyche-5,0,100);
+    lines.push('Чистая ночь — тело благодарит: −8 ❤, −5 🧠.');
+  }else{
+    S.heart=clamp(S.heart-2,0,100);
+    lines.push('День прошёл в полудрёме: −2 ❤.');
+  }
+  S.bod=S.bodMax; S.nerv=clamp(S.nerv-3,0,10);
+  lines.push('Выспался днём: Бодрость '+S.bodMax+'/'+S.bodMax+', −3 😬.');
+  const MQ=['Доброе реп.','Я рождён, чтобы ебашить.','Дух воина, а зарплата чмохи.','Потоскуем!','Нельзя расслабляться.','Набираю оборот.','Курю, следовательно, существую.'];
+  const smokedTonight=S.consumedTonight.some(c=>c.type!=='банка');
+  lines.push('<i style="color:var(--text2)">«'+(smokedTonight&&rnd()<0.4?'Я проснулся от желания курить.':MQ[Math.floor(rnd()*MQ.length)])+'»</i>');
+  $('mo-title').textContent='УТРО ПОСЛЕ НОЧИ '+S.night;
+  $('mo-body').innerHTML=lines.map(l=>'<p style="margin-bottom:8px">'+l+'</p>').join('')
+    +'<p class="mt"><b>Квота: '+Math.floor(S.work)+'/'+effQuota()+'</b>'+(S.cycleNight===3?' — сегодня дедлайн!':' — осталось '+(3-S.cycleNight)+' ноч.')+'</p>';
+  screen('scr-morning'); renderHUD();
+}
+function morningNext(){
+  if(S.cycleNight===3){ deadline(); return; }
+  S.night++; S.cycleNight++;
+  startNight();
+}
+
+// ─── ДЕДЛАЙН ─────────────────────────────────────────────────────────
+function deadline(){
+  const need=effQuota(); const got=Math.floor(S.work);
+  $('dl-title').textContent='ДЕДЛАЙН '+(S.cycle+1)+'/5 · КВОТА '+need;
+  const slot=$('dl-slot'); slot.className='slotres'; slot.textContent='— — —';
+  $('dl-body').innerHTML=''; $('dl-btns').innerHTML='';
+  screen('scr-deadline');
+  // барабаны прокручивают итог: ты уже сделал ставку своей ночью
+  let n=0;
+  const iv=setInterval(()=>{
+    slot.textContent=Math.floor(rnd()*need*1.4)+' / '+need;
+    if(++n>=14){ clearInterval(iv); resolveDeadline(need,got); }
+  },90);
+}
+function resolveDeadline(need,got){
+  const slot=$('dl-slot');
+  slot.textContent=got+' / '+need;
+  const body=$('dl-body'); const btns=$('dl-btns');
+  const next=()=>{ // к следующему циклу
+    S.cycle++; S.night++; S.cycleNight=1; S.work=0; S.likesCycle=0; S.validolUsed=false;
+    startNight();
+  };
+  if(got>=need){
+    slot.classList.add('ok'); slot.textContent=got+' / '+need+' ✓';
+    S.stats.deadlinesOk++;
+    let reward=REWARDS[S.cycle];
+    const likeBonus=S.likesCycle*10;
+    S.money+=reward+likeBonus;
+    S.carriedDebt=0;
+    body.innerHTML='<p><b style="color:var(--green)">СДАЛ.</b> +'+reward+'₽'
+      +(likeBonus?' · донаты за обзоры: +'+likeBonus+'₽ ('+S.likesCycle+' 👍)':'')+'</p>';
+    if(S.cycle===4){ finishRun('win'); return; }
+    if(S.cycle===2){
+      body.innerHTML+='<p class="mt">Премия: выбери брелок.</p>';
+      const owned=new Set(S.trinkets);
+      let pool=TRINKETS.filter(t=>!owned.has(t.id) && (META.sUnlocked||t.r!=='S'));
+      pool.sort(()=>rnd()-0.5); pool=pool.slice(0,3);
+      openPick('НАГРАДА — выбери брелок', pool.map(t=>({
+        html:'<span class="ph"><i class="ti ti-key"></i></span><span><span class="nm">'+esc(t.name)+'</span><br><span class="st">'+esc(t.desc)+'</span></span><span class="tier t-'+t.r+'">'+t.r+'</span>',
+        fn:()=>{ closePick();
+          if(S.trinkets.length<5){ gainTrinket(t.id); toast('Брелок «'+t.name+'» на связке'); }
+          else toast('Слоты заняты — брелок остался на полке');
+          next(); },
+      })), true);
+      return;
+    }
+    const b=document.createElement('button'); b.className='btn primary big'; b.textContent='Следующий цикл';
+    b.onclick=next; btns.appendChild(b);
+    return;
+  }
+  // не сдал: больничный прощается один раз
+  if(S.hospitalTonight && !S.hospitalPardonUsed){
+    S.hospitalPardonUsed=true;
+    slot.classList.add('bad'); slot.textContent=got+' / '+need+' ✕';
+    body.innerHTML='<p><b style="color:var(--red)">Провал…</b> но справка из приёмного покоя прощает этот дедлайн. Один раз. Без награды.</p>';
+    if(S.cycle===4){ finishRun('lose'); return; }
+    const b=document.createElement('button'); b.className='btn primary big'; b.textContent='Дальше (без денег)';
+    b.onclick=next; btns.appendChild(b);
+    return;
+  }
+  // фрилансер может перезанять ≤25% квоты (раз за ран)
+  const missing=need-got;
+  if(S.cls==='free' && !S.freeUsed && missing<=need*0.25 && S.cycle<4){
+    slot.classList.add('bad'); slot.textContent=got+' / '+need+' …';
+    body.innerHTML='<p>Не хватает <b>'+missing+' ед.</b> Можешь перезанять: недостача ×1.5 уйдёт в следующую квоту.</p>';
+    const b=document.createElement('button'); b.className='btn primary big'; b.textContent='ПЕРЕЗАНЯТЬ (+'+Math.ceil(missing*1.5)+' ед. к след.)';
+    b.onclick=()=>{
+      S.freeUsed=true; S.carriedDebt=Math.ceil(missing*1.5);
+      const partial=Math.round(REWARDS[S.cycle]*got/need);
+      S.money+=partial;
+      toast('Перезанял. Заплатили частично: +'+partial+'₽');
+      next();
+    };
+    btns.appendChild(b);
+    const b2=document.createElement('button'); b2.className='btn big'; b2.style.marginLeft='8px'; b2.textContent='Принять люк';
+    b2.onclick=()=>hatch(); btns.appendChild(b2);
+    return;
+  }
+  slot.classList.add('bad'); slot.textContent=got+' / '+need+' ✕';
+  body.innerHTML='<p><b style="color:var(--red)">КВОТА НЕ СДАНА.</b> Не хватило '+missing+' ед.</p>';
+  setTimeout(hatch,1400);
+}
+
+function hatch(){
+  if(S.cycle>=3) { META.sUnlocked=true; saveMeta(META); } // люк на 4+ дедлайне открывает S-брелоки
+  screen('scr-hatch');
+  S.ended=true; S.endKind='hatch';
+}
+
+// ─── ФИНАЛ И ЧЕК ─────────────────────────────────────────────────────
+function finishRun(kind){
+  S.ended=true; S.endKind=kind;
+  if(kind==='win'){ META.wins++; }
+  saveMeta(META);
+  showReceipt();
+}
+function endingText(){
+  if(S.endKind!=='win') return {t:'ЛЮК', d:'Квота не сдана. Пол-решётка под столом открылась. Кал ведёт только к большему калу.'};
+  if(S.heart<40 && S.tar<30) return {t:'СЕКРЕТНАЯ КОНЦОВКА: ПРАВЕДНИК', d:'Сдал сессию почти целым. Это не физика — это характер. Тусовка не верит.'};
+  if(S.heart>=70 && S.tar>=70 && S.psyche>=70) return {t:'ПОБЕДИЛ. НАВЕРНОЕ', d:'Сессия сдана. За неё ты, конечно, оскотинился. Осталось вспомнить, зачем всё это.'};
+  return {t:'СДАЛ СЕССИЮ', d:'Вкус закрытой сессии. Тело выставило счёт — см. ниже.'};
+}
+function healthMult(){ return clamp((320-S.heart-S.tar-S.psyche)/160,0.5,2); }
+function runScore(){
+  return Math.round(S.totalWork*(1+S.likes/200)*healthMult());
+}
+function showReceipt(){
+  const score=S.endKind==='win'?runScore():Math.round(runScore()*0.4);
+  if(score>META.best){ META.best=score; saveMeta(META); }
+  const e=endingText();
+  const row=(a,b)=>'<div class="row"><span>'+a+'</span><span>'+b+'</span></div>';
+  $('receipt').innerHTML=
+    '<div class="rc-h">СКЕС МАШИНА<br>НОЧНАЯ СМЕНА</div>'
+    +'<div class="rc-h" style="font-size:11px">*** ЧЕК ***</div><hr>'
+    +row('Класс', CLASSES[S.cls].name)
+    +row('Ночей отработано', S.night)
+    +row('Ед. работы', Math.floor(S.totalWork))
+    +row('Дедлайнов сдано', S.stats.deadlinesOk+'/5')
+    +'<hr>'
+    +row('Банок выпито', S.stats.cans)
+    +row('Сиг выкурено', S.stats.cigs)
+    +row('Скес-комбо', S.stats.combos)
+    +row('Обзоров написано', S.stats.reviews)
+    +row('Лайков собрано', S.stats.likes)
+    +row('Срывов', S.stats.breakdowns)
+    +row('Скорая', S.stats.ambulance+' раз')
+    +'<hr><div style="text-align:center">ИЗНОС ТЕЛА</div>'
+    +row('Сердце', Math.round(S.heart)+'/100')
+    +row('Смола', Math.round(S.tar)+'/100')
+    +row('Психика', Math.round(S.psyche)+'/100')
+    +row('Макс. бодрость', S.bodMax+' (было '+CLASSES[S.cls].bodMax+')')
+    +'<hr>'
+    +row('Множитель здоровья', '×'+healthMult().toFixed(2))
+    +'<div class="row tot"><span>ОЧКИ</span><span>'+score+'</span></div>'
+    +'<hr><div style="text-align:center"><b>'+e.t+'</b><br><span style="font-weight:400">'+e.d+'</span></div>'
+    +'<div style="text-align:center;margin-top:10px;font-size:11px">здоровая победа &gt;&gt; грязная победа<br>прод бай скес машина нахуй · '+new Date().toLocaleDateString('ru-RU')+'<br><b>Скес Машина. Подписаться</b></div>';
+  screen('scr-receipt');
+  document.body.classList.remove('pulse50','pulse70','psycho');
+}
+function backToTitle(){
+  S=null; renderTitle(); screen('scr-title');
+}
+
+// ─── универсальная модалка выбора ────────────────────────────────────
+let pickForced=false;
+function openPick(title, rows, forced){
+  pickForced=!!forced;
+  $('pick-title').textContent=title;
+  const box=$('pick-items'); box.innerHTML='';
+  rows.forEach(r=>box.appendChild(itemRow(r.html,r.fn,r.cls)));
+  document.querySelector('#pick-overlay .mod-close').style.display=forced?'none':'';
+  show('pick-overlay');
+}
+function closePick(){ hide('pick-overlay'); pickForced=false; }
+$('pick-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget && !pickForced) closePick(); });
+
+// ─── возрастной гейт и запуск ────────────────────────────────────────
+(function init(){
+  if(!localStorage.getItem('skes_age_ok')){
+    if(confirm('Игра 18+: в ней курят и пьют энергетики, и им от этого плохо. Тебе есть 18?')){
+      localStorage.setItem('skes_age_ok','1');
+    }else{
+      document.body.innerHTML='<p style="padding:40px;text-align:center;font-family:monospace;color:#d8e2ea;background:#0b0e12">Возвращайся, когда стукнет 18. Спи по ночам — это имба.</p>';
+      return;
+    }
+  }
+  renderTitle();
+  loadCans();
+})();
+</script>
+</body>
+</html>
